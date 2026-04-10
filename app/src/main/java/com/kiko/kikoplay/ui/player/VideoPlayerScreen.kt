@@ -72,7 +72,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import kotlinx.coroutines.delay
 import master.flame.danmaku.danmaku.model.BaseDanmaku
@@ -159,7 +158,12 @@ fun VideoPlayerScreen(
     val danmakuContext = remember {
         DanmakuContext.create()
     }
-    val danmakuView = remember { DanmakuView(context) }
+    val danmakuView = remember {
+        DanmakuView(context).apply {
+            enableDanmakuDrawingCache(true)
+            show()
+        }
+    }
     var danmakuPrepared by remember { mutableStateOf(false) }
 
     // Load danmaku into view
@@ -173,19 +177,22 @@ fun VideoPlayerScreen(
                     // prepared() 在后台线程回调，必须 post 到主线程操作 DanmakuView
                     danmakuView.post {
                         val exoTime = exoPlayer.currentPosition
-                        android.util.Log.d("DanmakuDebug", "prepared() on main thread, exoPos=${exoTime}ms, calling start+seekTo+resume")
+                        danmakuView.show()
                         danmakuView.start(exoTime)
-                        if (exoPlayer.isPlaying) danmakuView.resume() else danmakuView.pause()
+                        if (exoPlayer.isPlaying) {
+                            danmakuView.resume()
+                        } else {
+                            danmakuView.pause()
+                        }
                         danmakuPrepared = true
-                        android.util.Log.d("DanmakuDebug", "after start: isPaused=${danmakuView.isPaused}, danmakuTime=${danmakuView.currentTime}ms")
                     }
                 }
                 override fun updateTimer(timer: master.flame.danmaku.danmaku.model.DanmakuTimer) {}
-                override fun danmakuShown(danmaku: BaseDanmaku?) {
-                    android.util.Log.d("DanmakuDebug", "danmakuShown: ${danmaku?.text}")
-                }
+                override fun danmakuShown(danmaku: BaseDanmaku?) {}
                 override fun drawingFinished() {}
             })
+            danmakuView.enableDanmakuDrawingCache(true)
+            danmakuView.show()
             danmakuView.prepare(parser, danmakuContext)
         }
     }
@@ -201,8 +208,6 @@ fun VideoPlayerScreen(
     LaunchedEffect(isPlaying, danmakuPrepared) {
         if (!danmakuPrepared) return@LaunchedEffect
         delay(300)
-        val dvTime = danmakuView.currentTime
-        android.util.Log.d("DanmakuDebug", "sync: isPlaying=$isPlaying, isPaused=${danmakuView.isPaused}, danmakuTime=${dvTime}ms, exoPos=${currentPosition}ms, exoDuration=${duration}ms")
         try {
             if (isPlaying) danmakuView.resume() else danmakuView.pause()
         } catch (_: Exception) {}
@@ -216,12 +221,10 @@ fun VideoPlayerScreen(
             val dvTime = danmakuView.currentTime
             val exoTime = exoPlayer.currentPosition
             val diff = exoTime - dvTime
-            android.util.Log.d("DanmakuDebug", "timer: danmaku=${dvTime}ms, exo=${exoTime}ms, diff=${diff}ms, isPaused=${danmakuView.isPaused}, isDrawing=${danmakuView.isShown}")
             // 当弹幕时间与播放器时间偏差超过 1 秒时，强制同步
             if (kotlin.math.abs(diff) > 1000) {
                 try {
                     danmakuView.seekTo(exoTime)
-                    android.util.Log.d("DanmakuDebug", "seekTo corrected: $dvTime -> $exoTime")
                 } catch (e: Exception) {
                     android.util.Log.w("DanmakuDebug", "seekTo failed", e)
                 }

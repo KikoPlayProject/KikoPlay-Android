@@ -112,6 +112,44 @@ powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant release -NoDae
 .\gradlew.bat -PenableAndroidTests=true connectedDebugAndroidTest
 ```
 
+## 模拟器调试
+
+当前环境已经验证可用的模拟器调试方式如下：
+
+- 雷电模拟器 adb 路径：`D:\Program Files\leidian\LDPlayer9\adb.exe`
+- 当前常用设备 serial：`emulator-5554`
+- 推荐构建方式仍然是项目脚本：`powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant debug -NoDaemon`
+- 推荐安装方式：`D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 install -r app\build\outputs\apk\debug\app-debug.apk`
+- 推荐启动方式：`D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 shell am start -n com.kiko.kikoplay/.MainActivity`
+
+常用排查命令：
+
+```powershell
+# 查看设备
+D:\Program Files\leidian\LDPlayer9\adb.exe devices
+
+# 启动应用
+D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 shell am start -n com.kiko.kikoplay/.MainActivity
+
+# 停止应用
+D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 shell am force-stop com.kiko.kikoplay
+
+# 抓取日志
+D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 logcat -d
+
+# 导出界面树
+D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 exec-out uiautomator dump /dev/tty
+
+# 截图
+D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 shell screencap -p /sdcard/screen.png
+D:\Program Files\leidian\LDPlayer9\adb.exe -s emulator-5554 pull /sdcard/screen.png .\screen.png
+```
+
+注意：
+
+- 不建议直接使用默认 `.\gradlew.bat installDebug` 进行安装，当前环境容易命中 `C:\Users\Kikyou\.gradle` 下的锁文件或权限问题
+- 如果需要定位播放器 / 弹幕问题，优先结合 `logcat`、`uiautomator dump` 和截图一起排查
+
 ## 顶层文件
 
 | 路径 | 说明 |

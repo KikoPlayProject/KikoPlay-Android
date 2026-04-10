@@ -2,14 +2,10 @@ package com.kiko.kikoplay.ui.player.danmaku
 
 import android.graphics.Color
 import master.flame.danmaku.danmaku.model.BaseDanmaku
-import master.flame.danmaku.danmaku.model.Duration
-import master.flame.danmaku.danmaku.model.FTDanmaku
-import master.flame.danmaku.danmaku.model.FBDanmaku
-import master.flame.danmaku.danmaku.model.R2LDanmaku
 import master.flame.danmaku.danmaku.model.IDanmakus
-import master.flame.danmaku.danmaku.model.android.DanmakuContext
 import master.flame.danmaku.danmaku.model.android.Danmakus
 import master.flame.danmaku.danmaku.parser.BaseDanmakuParser
+import master.flame.danmaku.danmaku.util.DanmakuUtils
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
@@ -87,18 +83,21 @@ object DanmakuParser {
                 }
                 val danmaku = mContext.mDanmakuFactory.createDanmaku(type, mContext) ?: return@forEach
                 danmaku.flags = globalFlags
-                danmaku.time = (item.time * 1000).toLong()
-                danmaku.textSize = 25f * (mContext.displayer?.density ?: 1f)
+                danmaku.setTimer(mTimer)
+                danmaku.setTime((item.time * 1000).toLong())
+                danmaku.index = addedCount
+                danmaku.textSize = 22f * (mContext.displayer?.scaledDensity ?: mContext.displayer?.density ?: 1f)
                 danmaku.textColor = item.color or (0xFF shl 24)
                 danmaku.textShadowColor = if (isLightColor(item.color)) Color.BLACK else Color.WHITE
-                danmaku.text = item.text
+                danmaku.padding = 2
                 danmaku.priority = 0
+                DanmakuUtils.fillText(danmaku, item.text)
                 danmakus.addItem(danmaku)
                 addedCount++
                 if (danmaku.time < firstTime) firstTime = danmaku.time
                 if (danmaku.time > lastTime) lastTime = danmaku.time
             }
-            android.util.Log.d("DanmakuDebug", "parse(): added=$addedCount, firstTime=${firstTime}ms, lastTime=${lastTime}ms, density=${mContext.displayer?.density}, textSize=${25f * (mContext.displayer?.density ?: 1f)}")
+            android.util.Log.d("DanmakuDebug", "parse(): added=$addedCount, firstTime=${firstTime}ms, lastTime=${lastTime}ms, density=${mContext.displayer?.density}, scaledDensity=${mContext.displayer?.scaledDensity}")
             if (addedCount > 0) {
                 // 打印前5条弹幕的详细信息
                 items.take(5).forEachIndexed { i, item ->
