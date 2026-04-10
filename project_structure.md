@@ -1,0 +1,306 @@
+﻿# KikoPlay Android 项目结构
+
+## 概述
+
+KikoPlay Android 是 KikoPlay PC 的局域网配套播放器客户端。
+
+当前版本基于 Kotlin + Jetpack Compose + AGP 9.1 开发，主要能力包括：
+
+- 连接局域网内的 KikoPlay PC 服务
+- 浏览 PC 播放列表并发起串流播放
+- 本地视频扫描与播放
+- 弹幕加载、发送与基础设置
+- 观看历史记录
+- 视频缓存与后台下载
+
+## 技术栈
+
+| 类别 | 技术 | 版本 |
+|------|------|------|
+| 语言 | Kotlin | 2.2.10 |
+| 构建 | Android Gradle Plugin | 9.1.0 |
+| Gradle | Gradle Wrapper | 9.3.1 |
+| UI | Jetpack Compose + Material3 | Compose BOM 2026.02.01 |
+| 架构 | MVVM | - |
+| 依赖注入 | Hilt + KSP | 2.59.2 |
+| 数据库 | Room + KSP | 2.7.1 |
+| 网络 | Retrofit 3 + OkHttp + kotlinx.serialization | 3.0.0 / 4.12.0 / 1.8.1 |
+| 播放器 | Media3 ExoPlayer | 1.6.0 |
+| 弹幕 | DanmakuFlameMaster | 0.9.25 |
+| 图片加载 | Coil 3 | 3.1.0 |
+| 偏好存储 | DataStore Preferences | 1.1.4 |
+| 后台任务 | WorkManager | 2.10.1 |
+
+## 构建说明
+
+### 推荐方式
+
+由于 Android Studio 的 Gradle Tooling 导入在当前环境下容易触发用户目录 `C:\Users\Kikyou\.gradle` 中的临时缓存损坏，项目内已提供独立构建脚本，优先使用该脚本生成 APK。
+
+相关文件：
+
+- `build-apk.ps1`
+- `build-apk.bat`
+
+默认行为：
+
+- 自动优先使用 Android Studio 自带 JBR
+- 自动使用项目内独立 `GRADLE_USER_HOME`
+- 直接执行 `assembleDebug` 或 `assembleRelease`
+- 尽量绕开全局 Gradle 缓存污染
+- Gradle Wrapper 已切换为 `gradle-9.3.1-all.zip` 镜像分发包，避免 Android Studio 额外拉取源码包时反复超时
+
+项目内优先使用的 Gradle 缓存目录：
+
+- `.gradle-user-home-allzip`
+- `.gradle-user-home-build`
+
+### 常用命令
+
+```powershell
+# 生成 debug APK
+.\build-apk.bat
+
+# 等价 PowerShell 命令
+powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant debug -NoDaemon
+
+# 清理后重新生成 debug APK
+powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant debug -Clean -NoDaemon
+
+# 生成 release APK
+powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant release -NoDaemon
+```
+
+### 脚本参数
+
+| 参数 | 说明 |
+|------|------|
+| `-Variant debug` | 生成 Debug APK，默认值 |
+| `-Variant release` | 生成 Release APK |
+| `-Clean` | 先执行 `clean` 再构建 |
+| `-NoDaemon` | 禁用 Gradle Daemon，适合规避一次性缓存状态问题 |
+
+### APK 输出目录
+
+- Debug APK: `app/build/outputs/apk/debug/app-debug.apk`
+- Release APK: `app/build/outputs/apk/release/`
+
+### 仍需注意
+
+- `gradle.properties` 中保留了 `android.disallowKotlinSourceSets=false`
+- `settings.gradle.kts` 中包含 JitPack 仓库，用于 `DanmakuFlameMaster`
+- Android Studio 自身如果继续走用户目录 `C:\Users\Kikyou\.gradle`，仍可能触发 IDE 侧的缓存损坏问题；脚本构建不依赖这套全局缓存
+- 当前环境可能仍会出现 `SDK XML version 4` 的 warning，这通常与 Android Studio / SDK command-line tools 版本不一致有关，但不一定阻塞脚本构建
+
+## 测试构建策略
+
+当前项目默认关闭 Android 仪器测试变体，以规避 `debugAndroidTestRuntimeClasspath` 在当前环境中的依赖解析损坏问题。
+
+对应实现位于：
+
+- `app/build.gradle.kts`
+
+当前行为：
+
+- 默认不创建 Android Test variant
+- 默认不解析 `androidTestImplementation(...)` 依赖
+- 常规 APK 构建不受影响
+
+如果后续需要恢复仪器测试，可显式传入：
+
+```powershell
+.\gradlew.bat -PenableAndroidTests=true connectedDebugAndroidTest
+```
+
+## 顶层文件
+
+| 路径 | 说明 |
+|------|------|
+| `build.gradle.kts` | 根构建脚本 |
+| `settings.gradle.kts` | 模块与仓库配置 |
+| `gradle.properties` | Gradle 项目级参数 |
+| `gradle/libs.versions.toml` | 版本目录 |
+| `gradle/wrapper/gradle-wrapper.properties` | Gradle Wrapper 配置 |
+| `build-apk.ps1` | 推荐的 APK 构建脚本 |
+| `build-apk.bat` | Windows 包装脚本 |
+| `project_structure.md` | 本文档 |
+
+## 代码结构
+
+```text
+com.kiko.kikoplay/
+├── KikoPlayApplication.kt
+├── MainActivity.kt
+├── di/
+│   ├── AppModule.kt
+│   ├── DatabaseModule.kt
+│   └── NetworkModule.kt
+├── data/
+│   ├── local/
+│   │   ├── AppDatabase.kt
+│   │   ├── dao/
+│   │   │   ├── CacheTaskDao.kt
+│   │   │   ├── ConnectionDao.kt
+│   │   │   └── WatchHistoryDao.kt
+│   │   └── entity/
+│   │       ├── CacheTaskEntity.kt
+│   │       ├── ConnectionEntity.kt
+│   │       └── WatchHistoryEntity.kt
+│   ├── remote/
+│   │   ├── BaseUrlInterceptor.kt
+│   │   ├── ConnectionManager.kt
+│   │   ├── KikoPlayApi.kt
+│   │   └── model/
+│   │       ├── DanmakuModels.kt
+│   │       ├── PlaylistModels.kt
+│   │       ├── PlayStateModels.kt
+│   │       ├── RequestModels.kt
+│   │       └── SubtitleModels.kt
+│   └── repository/
+│       ├── CacheRepository.kt
+│       ├── ConnectionRepository.kt
+│       ├── LocalVideoRepository.kt
+│       ├── PlaylistRepository.kt
+│       ├── SettingsRepository.kt
+│       └── WatchHistoryRepository.kt
+├── service/
+│   └── CacheDownloadWorker.kt
+├── ui/
+│   ├── cache/
+│   │   ├── CacheScreen.kt
+│   │   └── CacheViewModel.kt
+│   ├── common/
+│   │   └── EmptyState.kt
+│   ├── connection/
+│   │   ├── ConnectionScreen.kt
+│   │   └── ConnectionViewModel.kt
+│   ├── home/
+│   │   ├── HomeScreen.kt
+│   │   ├── HomeViewModel.kt
+│   │   ├── WatchHistoryScreen.kt
+│   │   └── WatchHistoryViewModel.kt
+│   ├── local/
+│   │   ├── LocalVideosScreen.kt
+│   │   └── LocalVideosViewModel.kt
+│   ├── navigation/
+│   │   ├── KikoBottomBar.kt
+│   │   ├── KikoNavHost.kt
+│   │   ├── PlaceholderScreen.kt
+│   │   ├── Route.kt
+│   │   └── TopLevelDestination.kt
+│   ├── player/
+│   │   ├── VideoPlayerScreen.kt
+│   │   ├── VideoPlayerViewModel.kt
+│   │   ├── components/
+│   │   │   └── ScreenshotClipDialog.kt
+│   │   └── danmaku/
+│   │       ├── DanmakuParser.kt
+│   │       ├── DanmakuSettingsPanel.kt
+│   │       └── SendDanmakuDialog.kt
+│   ├── playlist/
+│   │   ├── PlaylistBrowserScreen.kt
+│   │   └── PlaylistBrowserViewModel.kt
+│   ├── settings/
+│   │   ├── SettingsScreen.kt
+│   │   └── SettingsViewModel.kt
+│   └── theme/
+│       ├── Color.kt
+│       ├── Theme.kt
+│       └── Type.kt
+└── util/
+    ├── MediaUrlBuilder.kt
+    └── NetworkScanner.kt
+```
+
+## 主要模块说明
+
+### 应用入口
+
+- `KikoPlayApplication.kt`: Hilt 应用入口
+- `MainActivity.kt`: 根 Activity，承载 Scaffold、导航和底部栏
+
+### 依赖注入
+
+- `AppModule.kt`: 应用级对象，如 Json / DataStore / 连接状态对象
+- `DatabaseModule.kt`: Room 数据库与 DAO 注入
+- `NetworkModule.kt`: OkHttp / Retrofit / API 注入
+
+### 数据层
+
+- `data/local`: Room 数据库、实体和 DAO
+- `data/remote`: REST API、连接状态与网络 DTO
+- `data/repository`: 面向 ViewModel 的仓库层封装
+
+### UI 层
+
+- `ui/home`: 首页与观看历史入口
+- `ui/connection`: 局域网连接管理
+- `ui/playlist`: PC 播放列表浏览
+- `ui/player`: 播放器、弹幕与截图片段交互
+- `ui/local`: 本地视频列表
+- `ui/cache`: 缓存任务管理
+- `ui/settings`: 应用设置
+- `ui/navigation`: 底部导航和路由
+- `ui/theme`: Compose 主题配置
+
+### 后台任务
+
+- `CacheDownloadWorker.kt`: 负责缓存下载、断点续传与后台执行
+
+### 工具类
+
+- `NetworkScanner.kt`: 局域网扫描
+- `MediaUrlBuilder.kt`: 构建媒体与字幕地址
+
+## 测试目录
+
+```text
+app/src/test/
+└── java/com/kiko/kikoplay/ExampleUnitTest.kt
+
+app/src/androidTest/
+└── java/com/kiko/kikoplay/ExampleInstrumentedTest.kt
+```
+
+说明：
+
+- 当前两个测试文件仍是模板级示例
+- `androidTest` 目录保留，但默认不参与构建解析
+
+## KikoPlay LAN API 对接情况
+
+| API | 用途 | 状态 |
+|-----|------|------|
+| `GET /api/playlist` | 获取播放列表树 | 已接入 |
+| `GET /api/playstate` | 获取播放状态 / 连接验证 | 已接入 |
+| `GET /media/{mediaID}` | 串流媒体文件 | 已接入 |
+| `GET /sub/{format}/{mediaID}` | 获取字幕 | 已接入 |
+| `GET /api/subtitle?id=` | 检查字幕是否存在 | 已接入 |
+| `GET /api/danmu/v3/` | 获取过滤弹幕 | 已接入 |
+| `GET /api/danmu/full/` | 获取完整弹幕与来源信息 | 已接入 |
+| `GET /api/danmu/local/` | 获取本地 XML 弹幕 | 已接入 |
+| `POST /api/updateTime` | 同步播放进度 | 已接入 |
+| `POST /api/updateDelay` | 更新弹幕延迟 | 已接入 |
+| `POST /api/updateTimeline` | 更新时间轴 | 已接入 |
+| `POST /api/screenshot` | 远程截图 / 截取片段 | 已接入 |
+| `POST /api/danmu/launch` | 发送弹幕 | 已接入 |
+
+## Room 数据库
+
+数据库名：`kikoplay.db`  
+版本：`1`
+
+| 表名 | 用途 |
+|------|------|
+| `connections` | 连接历史 |
+| `watch_history` | 观看历史 |
+| `cache_tasks` | 缓存任务 |
+
+## 已知待完善项
+
+1. KService gRPC 集成尚未完成
+2. 弹幕与播放器的精确 seek 同步仍有优化空间
+3. DanmakuFlameMaster 0.9.25 的类型过滤能力有限
+4. 播放手势控制尚未完全实现
+5. 缓存恢复下载仍缺少真机充分验证
+6. 首页目录快捷入口仍可继续优化
