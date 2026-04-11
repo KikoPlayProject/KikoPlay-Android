@@ -7,7 +7,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -34,14 +34,17 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kiko.kikoplay.data.local.entity.ConnectionEntity
+import com.kiko.kikoplay.data.remote.ConnectionInfo
 import com.kiko.kikoplay.util.DiscoveredDevice
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,17 +67,16 @@ fun ConnectionScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.connectionHistory.collectAsStateWithLifecycle()
+    val activeConnection by viewModel.activeConnection.collectAsStateWithLifecycle()
 
     DisposableEffect(Unit) {
         viewModel.startScan()
         onDispose { viewModel.stopScan() }
     }
 
-    // Navigate when connected
-    if (uiState.isConnected) {
-        DisposableEffect(Unit) {
+    LaunchedEffect(viewModel) {
+        viewModel.navigateToPlaylistEvents.collectLatest {
             onConnected()
-            onDispose {}
         }
     }
 
@@ -95,6 +99,15 @@ fun ConnectionScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            activeConnection?.let { connectionInfo ->
+                item {
+                    CurrentConnectionSection(
+                        connectionInfo = connectionInfo,
+                        onDisconnect = viewModel::disconnect
+                    )
+                }
+            }
+
             // Auto scan section
             item {
                 ScanSection(
@@ -152,6 +165,54 @@ fun ConnectionScreen(
 }
 
 @Composable
+private fun CurrentConnectionSection(
+    connectionInfo: ConnectionInfo,
+    onDisconnect: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Computer,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = connectionInfo.deviceName ?: "KikoPlay",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "${connectionInfo.host}:${connectionInfo.port}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                )
+            }
+            IconButton(
+                onClick = onDisconnect,
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) {
+                Icon(
+                    Icons.Default.LinkOff,
+                    contentDescription = "断开连接"
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ScanSection(
     isScanning: Boolean,
     devices: List<DiscoveredDevice>,
@@ -189,7 +250,7 @@ private fun ScanSection(
                 Spacer(Modifier.width(4.dp))
                 Text("扫描中...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             } else {
-                OutlinedButton(onClick = onRescan) { Text("重新扫描") }
+                TextButton(onClick = onRescan) { Text("重新扫描") }
             }
         }
 

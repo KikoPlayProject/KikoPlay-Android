@@ -9,9 +9,12 @@ import com.kiko.kikoplay.util.DiscoveredDevice
 import com.kiko.kikoplay.util.NetworkScanner
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -24,8 +27,7 @@ data class ConnectionUiState(
     val manualHost: String = "",
     val manualPort: String = "8000",
     val isConnecting: Boolean = false,
-    val connectionError: String? = null,
-    val isConnected: Boolean = false
+    val connectionError: String? = null
 )
 
 @HiltViewModel
@@ -43,11 +45,10 @@ class ConnectionViewModel @Inject constructor(
 
     val activeConnection: StateFlow<ConnectionInfo?> = connectionRepository.activeConnection
 
-    private var scanJob: Job? = null
+    private val _navigateToPlaylistEvents = MutableSharedFlow<Unit>()
+    val navigateToPlaylistEvents: SharedFlow<Unit> = _navigateToPlaylistEvents.asSharedFlow()
 
-    init {
-        _uiState.update { it.copy(isConnected = connectionRepository.isConnected) }
-    }
+    private var scanJob: Job? = null
 
     fun startScan() {
         scanJob?.cancel()
@@ -86,9 +87,11 @@ class ConnectionViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isConnecting = false,
-                    isConnected = result.isSuccess,
                     connectionError = result.exceptionOrNull()?.message
                 )
+            }
+            if (result.isSuccess) {
+                _navigateToPlaylistEvents.emit(Unit)
             }
         }
     }
@@ -115,6 +118,5 @@ class ConnectionViewModel @Inject constructor(
 
     fun disconnect() {
         connectionRepository.disconnect()
-        _uiState.update { it.copy(isConnected = false) }
     }
 }
