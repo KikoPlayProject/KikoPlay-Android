@@ -15,7 +15,7 @@ import com.kiko.kikoplay.data.local.entity.WatchHistoryEntity
         WatchHistoryEntity::class,
         CacheTaskEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

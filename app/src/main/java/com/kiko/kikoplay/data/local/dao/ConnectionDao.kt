@@ -10,6 +10,9 @@ interface ConnectionDao {
     @Query("SELECT * FROM connections ORDER BY lastConnected DESC")
     fun getAll(): Flow<List<ConnectionEntity>>
 
+    @Query("SELECT * FROM connections ORDER BY lastConnected DESC LIMIT 1")
+    suspend fun getLatest(): ConnectionEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: ConnectionEntity): Long
 

@@ -13,16 +13,26 @@ import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.lifecycleScope
+import com.kiko.kikoplay.data.repository.ConnectionRepository
 import com.kiko.kikoplay.ui.navigation.KikoBottomBar
 import com.kiko.kikoplay.ui.navigation.KikoNavHost
 import com.kiko.kikoplay.ui.navigation.TopLevelDestination
 import com.kiko.kikoplay.ui.theme.KikoPlayTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject
+    lateinit var connectionRepository: ConnectionRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycleScope.launch {
+            connectionRepository.reconnectLastConnection()
+        }
         enableEdgeToEdge()
         setContent {
             KikoPlayTheme {

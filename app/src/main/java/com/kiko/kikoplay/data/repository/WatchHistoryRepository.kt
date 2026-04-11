@@ -8,7 +8,8 @@ import javax.inject.Singleton
 
 @Singleton
 class WatchHistoryRepository @Inject constructor(
-    private val watchHistoryDao: WatchHistoryDao
+    private val watchHistoryDao: WatchHistoryDao,
+    private val historyThumbnailRepository: HistoryThumbnailRepository
 ) {
     fun getRecent(limit: Int = 20): Flow<List<WatchHistoryEntity>> = watchHistoryDao.getRecent(limit)
 
@@ -22,10 +23,22 @@ class WatchHistoryRepository @Inject constructor(
         duration: Long,
         playTimeState: Int,
         sourceType: Int,
+        isCached: Boolean,
+        remoteUri: String?,
+        localPath: String?,
         danmuPool: String?,
         serverAddress: String?
     ) {
-        val existing = watchHistoryDao.getByMediaId(mediaId)
+        val existing = watchHistoryDao.findExisting(
+            mediaId = mediaId,
+            sourceType = sourceType,
+            serverAddress = serverAddress,
+            localPath = localPath
+        )
+        val thumbnailData = when {
+            existing?.thumbnailData != null && existing.localPath == localPath -> existing.thumbnailData
+            else -> historyThumbnailRepository.createThumbnail(localPath) ?: existing?.thumbnailData
+        }
         watchHistoryDao.upsert(
             WatchHistoryEntity(
                 id = existing?.id ?: 0,
@@ -36,7 +49,10 @@ class WatchHistoryRepository @Inject constructor(
                 duration = duration,
                 playTimeState = playTimeState,
                 sourceType = sourceType,
-                thumbnailPath = existing?.thumbnailPath,
+                isCached = isCached,
+                remoteUri = remoteUri,
+                localPath = localPath,
+                thumbnailData = thumbnailData,
                 lastWatched = System.currentTimeMillis(),
                 danmuPool = danmuPool,
                 serverAddress = serverAddress

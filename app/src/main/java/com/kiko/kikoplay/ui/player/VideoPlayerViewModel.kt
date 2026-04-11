@@ -12,6 +12,7 @@ import com.kiko.kikoplay.data.remote.model.UpdateTimeRequest
 import com.kiko.kikoplay.data.remote.model.UpdateTimelineRequest
 import com.kiko.kikoplay.data.remote.model.ScreenshotRequest
 import com.kiko.kikoplay.data.remote.model.LaunchDanmakuRequest
+import com.kiko.kikoplay.data.repository.CacheRepository
 import com.kiko.kikoplay.data.repository.WatchHistoryRepository
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuItem
@@ -51,6 +52,7 @@ class VideoPlayerViewModel @Inject constructor(
     private val api: KikoPlayApi,
     private val mediaUrlBuilder: MediaUrlBuilder,
     private val watchHistoryRepository: WatchHistoryRepository,
+    private val cacheRepository: CacheRepository,
     private val connectionManager: ConnectionManager
 ) : ViewModel() {
 
@@ -156,6 +158,25 @@ class VideoPlayerViewModel @Inject constructor(
         // Record watch history
         viewModelScope.launch {
             try {
+                val activeConnection = connectionManager.connection.value
+                val activeServerAddress = activeConnection?.let { "${it.host}:${it.port}" }
+                val cacheTask = cacheRepository.getByMediaId(route.mediaId)
+                val localPath = route.localPath ?: cacheTask?.localPath
+                val serverAddress = when (route.sourceType) {
+                    0 -> activeServerAddress
+                    2 -> cacheTask?.serverAddress ?: activeServerAddress
+                    else -> null
+                }
+                val isCached = when (route.sourceType) {
+                    2 -> true
+                    0 -> cacheRepository.getPlayableCache(route.mediaId, serverAddress) != null
+                    else -> false
+                }
+                val remoteUri = when (route.sourceType) {
+                    0 -> mediaUrlBuilder.buildMediaUrl(route.mediaId)
+                    2 -> serverAddress?.let { "http://$it/media/${route.mediaId}" }
+                    else -> null
+                }
                 watchHistoryRepository.record(
                     mediaId = route.mediaId,
                     title = route.title,
@@ -164,8 +185,11 @@ class VideoPlayerViewModel @Inject constructor(
                     duration = durationMs,
                     playTimeState = playTimeState,
                     sourceType = route.sourceType,
+                    isCached = isCached,
+                    remoteUri = remoteUri,
+                    localPath = localPath,
                     danmuPool = route.danmuPool,
-                    serverAddress = connectionManager.connection.value?.let { "${it.host}:${it.port}" }
+                    serverAddress = serverAddress
                 )
             } catch (_: Exception) {}
         }

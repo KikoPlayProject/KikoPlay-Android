@@ -24,13 +24,14 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,24 +42,60 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kiko.kikoplay.data.local.entity.WatchHistoryEntity
+import com.kiko.kikoplay.data.repository.HistoryPlaybackTarget
 import com.kiko.kikoplay.ui.common.EmptyState
+import kotlinx.coroutines.flow.collectLatest
 
 @Composable
 fun HomeScreen(
     onNavigateToConnection: () -> Unit = {},
     onNavigateToPlaylist: () -> Unit = {},
-    onNavigateToPlayer: (String, String, String?, String?) -> Unit = { _, _, _, _ -> },
+    onNavigateToPlayer: (HistoryPlaybackTarget) -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val connectionInfo by viewModel.connectionInfo.collectAsStateWithLifecycle()
     val recentHistory by viewModel.recentHistory.collectAsStateWithLifecycle()
     val recentDirs by viewModel.recentDirs.collectAsStateWithLifecycle()
+    val pendingSwitchRequest by viewModel.pendingSwitchRequest.collectAsStateWithLifecycle()
+    val isResolvingHistory by viewModel.isResolvingHistory.collectAsStateWithLifecycle()
     val isConnected = connectionInfo != null
 
     // Load recent dirs when connected
     LaunchedEffect(isConnected) {
         if (isConnected) viewModel.loadRecentDirs()
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.historyPlaybackEvents.collectLatest(onNavigateToPlayer)
+    }
+
+    if (pendingSwitchRequest != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissSwitchConnection,
+            title = { Text("切换连接") },
+            text = {
+                Text(
+                    "当前已连接 ${pendingSwitchRequest?.currentAddress}，是否切换到 ${pendingSwitchRequest?.targetAddress} 并播放该条目？"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::confirmSwitchConnection,
+                    enabled = !isResolvingHistory
+                ) {
+                    Text("切换")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = viewModel::dismissSwitchConnection,
+                    enabled = !isResolvingHistory
+                ) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     Column(
@@ -190,12 +227,7 @@ fun HomeScreen(
                     RecentWatchCard(
                         item = item,
                         onClick = {
-                            onNavigateToPlayer(
-                                item.mediaId,
-                                item.title,
-                                item.danmuPool,
-                                item.animeTitle
-                            )
+                            viewModel.onHistoryItemClick(item)
                         }
                     )
                 }

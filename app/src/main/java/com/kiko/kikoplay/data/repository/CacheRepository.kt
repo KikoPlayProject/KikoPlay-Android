@@ -142,4 +142,18 @@ class CacheRepository @Inject constructor(
     suspend fun getByMediaId(mediaId: String): CacheTaskEntity? {
         return cacheTaskDao.getByMediaId(mediaId)
     }
+
+    suspend fun getPlayableCache(mediaId: String, serverAddress: String? = null): CacheTaskEntity? {
+        val task = cacheTaskDao.getByMediaId(mediaId) ?: return null
+        if (task.status != CacheTaskEntity.STATUS_COMPLETED) return null
+
+        val localPath = task.localPath ?: return null
+        if (!File(localPath).exists()) return null
+
+        if (!serverAddress.isNullOrBlank() && !task.serverAddress.isNullOrBlank() && task.serverAddress != serverAddress) {
+            return null
+        }
+
+        return task
+    }
 }

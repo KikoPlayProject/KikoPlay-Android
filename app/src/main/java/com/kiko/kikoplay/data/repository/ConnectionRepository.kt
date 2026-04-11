@@ -22,6 +22,7 @@ class ConnectionRepository @Inject constructor(
     val isConnected: Boolean get() = connectionManager.isConnected
 
     suspend fun connect(host: String, port: Int, deviceName: String? = null): Result<Unit> {
+        val previousConnection = connectionManager.connection.value
         return try {
             connectionManager.connect(host, port, deviceName)
             // Validate by calling playstate
@@ -42,9 +43,32 @@ class ConnectionRepository @Inject constructor(
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            connectionManager.disconnect()
+            if (previousConnection != null) {
+                connectionManager.connect(
+                    previousConnection.host,
+                    previousConnection.port,
+                    previousConnection.deviceName
+                )
+            } else {
+                connectionManager.disconnect()
+            }
             Result.failure(e)
         }
+    }
+
+    suspend fun connect(entity: ConnectionEntity): Result<Unit> {
+        return connect(entity.host, entity.port, entity.deviceName)
+    }
+
+    suspend fun getLastConnection(): ConnectionEntity? {
+        return connectionDao.getLatest()
+    }
+
+    suspend fun reconnectLastConnection(): Result<Boolean> {
+        if (connectionManager.isConnected) return Result.success(false)
+
+        val lastConnection = connectionDao.getLatest() ?: return Result.success(false)
+        return connect(lastConnection).map { true }
     }
 
     fun disconnect() {

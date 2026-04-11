@@ -16,6 +16,26 @@ interface WatchHistoryDao {
     @Query("SELECT * FROM watch_history WHERE mediaId = :mediaId LIMIT 1")
     suspend fun getByMediaId(mediaId: String): WatchHistoryEntity?
 
+    @Query(
+        """
+        SELECT * FROM watch_history
+        WHERE mediaId = :mediaId
+          AND sourceType = :sourceType
+          AND (
+              (:sourceType = 1 AND ((localPath IS NULL AND :localPath IS NULL) OR localPath = :localPath))
+              OR
+              (:sourceType != 1 AND ((serverAddress IS NULL AND :serverAddress IS NULL) OR serverAddress = :serverAddress))
+          )
+        LIMIT 1
+        """
+    )
+    suspend fun findExisting(
+        mediaId: String,
+        sourceType: Int,
+        serverAddress: String?,
+        localPath: String?
+    ): WatchHistoryEntity?
+
     @Upsert
     suspend fun upsert(entity: WatchHistoryEntity)
 

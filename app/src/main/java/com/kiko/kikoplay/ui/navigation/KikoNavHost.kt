@@ -28,13 +28,15 @@ fun KikoNavHost(
             HomeScreen(
                 onNavigateToConnection = { navController.navigate(LanConnectionRoute) },
                 onNavigateToPlaylist = { navController.navigate(PlaylistBrowserRoute()) },
-                onNavigateToPlayer = { mediaId, title, danmuPool, animeTitle ->
+                onNavigateToPlayer = { target ->
                     navController.navigate(
                         VideoPlayerRoute(
-                            mediaId = mediaId,
-                            title = title,
-                            danmuPool = danmuPool,
-                            animeTitle = animeTitle
+                            mediaId = target.mediaId,
+                            title = target.title,
+                            sourceType = target.sourceType,
+                            danmuPool = target.danmuPool,
+                            animeTitle = target.animeTitle,
+                            localPath = target.localPath
                         )
                     )
                 },
@@ -113,13 +115,15 @@ fun KikoNavHost(
         composable<WatchHistoryRoute> {
             WatchHistoryScreen(
                 onBack = { navController.popBackStack() },
-                onNavigateToPlayer = { mediaId, title, danmuPool, animeTitle ->
+                onNavigateToPlayer = { target ->
                     navController.navigate(
                         VideoPlayerRoute(
-                            mediaId = mediaId,
-                            title = title,
-                            danmuPool = danmuPool,
-                            animeTitle = animeTitle
+                            mediaId = target.mediaId,
+                            title = target.title,
+                            sourceType = target.sourceType,
+                            danmuPool = target.danmuPool,
+                            animeTitle = target.animeTitle,
+                            localPath = target.localPath
                         )
                     )
                 }

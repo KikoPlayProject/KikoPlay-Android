@@ -13,7 +13,10 @@ data class WatchHistoryEntity(
     val duration: Long = 0,
     val playTimeState: Int = 0,
     val sourceType: Int = 0, // 0=PC, 1=local, 2=cached
-    val thumbnailPath: String? = null,
+    val isCached: Boolean = false,
+    val remoteUri: String? = null,
+    val localPath: String? = null,
+    val thumbnailData: ByteArray? = null,
     val lastWatched: Long = System.currentTimeMillis(),
     val danmuPool: String? = null,
     val serverAddress: String? = null
