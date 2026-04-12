@@ -136,8 +136,8 @@ fun VideoPlayerScreen(
 
     // Sync play time on pause/stop
     LaunchedEffect(isPlaying) {
-        if (!isPlaying && duration > 0) {
-            val state = if (currentPosition >= duration - 5000) 2 else if (currentPosition > 0) 1 else 0
+        if (!isPlaying && currentPosition > 0) {
+            val state = playbackState(currentPosition, duration)
             viewModel.syncPlayTime(currentPosition / 1000.0, state, duration)
         }
     }
@@ -145,8 +145,8 @@ fun VideoPlayerScreen(
     // Cleanup
     DisposableEffect(Unit) {
         onDispose {
-            if (duration > 0) {
-                val state = if (currentPosition >= duration - 5000) 2 else if (currentPosition > 0) 1 else 0
+            if (currentPosition > 0) {
+                val state = playbackState(currentPosition, duration)
                 viewModel.syncPlayTime(currentPosition / 1000.0, state, duration)
             }
             exoPlayer.release()
@@ -707,4 +707,10 @@ private fun formatTime(ms: Long): String {
     val s = totalSeconds % 60
     return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
     else String.format("%d:%02d", m, s)
+}
+
+private fun playbackState(currentPosition: Long, duration: Long): Int {
+    if (currentPosition <= 0) return 0
+    if (duration > 0 && currentPosition >= duration - 5000) return 2
+    return 1
 }

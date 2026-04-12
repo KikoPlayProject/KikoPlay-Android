@@ -43,6 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kiko.kikoplay.data.local.entity.CacheTaskEntity
 import com.kiko.kikoplay.ui.common.EmptyState
+import java.io.File
 
 @Composable
 fun CacheScreen(
@@ -161,7 +162,13 @@ private fun ActiveTaskItem(
             Text(
                 text = when (task.status) {
                     CacheTaskEntity.STATUS_QUEUED -> "等待中"
-                    CacheTaskEntity.STATUS_DOWNLOADING -> "${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}"
+                    CacheTaskEntity.STATUS_DOWNLOADING -> {
+                        if (task.totalBytes > 0) {
+                            "${formatBytes(task.downloadedBytes)} / ${formatBytes(task.totalBytes)}"
+                        } else {
+                            formatBytes(task.downloadedBytes)
+                        }
+                    }
                     CacheTaskEntity.STATUS_PAUSED -> "已暂停"
                     CacheTaskEntity.STATUS_FAILED -> "失败"
                     else -> ""
@@ -188,6 +195,7 @@ private fun CompletedTaskItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val displayBytes = resolveDisplayBytes(task)
             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -195,7 +203,7 @@ private fun CompletedTaskItem(
                 if (task.animeTitle != null) {
                     Text(task.animeTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(formatBytes(task.totalBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatBytes(displayBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -214,4 +222,13 @@ private fun formatBytes(bytes: Long): String {
         unitIndex++
     }
     return "%.1f %s".format(value, units[unitIndex])
+}
+
+private fun resolveDisplayBytes(task: CacheTaskEntity): Long {
+    if (task.totalBytes > 0) return task.totalBytes
+    if (task.downloadedBytes > 0) return task.downloadedBytes
+
+    val localPath = task.localPath ?: return 0L
+    val localFile = File(localPath)
+    return if (localFile.exists()) localFile.length() else 0L
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.kiko.kikoplay.data.local.model.CachedDanmakuPayload
 import com.kiko.kikoplay.data.remote.ConnectionManager
 import com.kiko.kikoplay.data.remote.KikoPlayApi
 import com.kiko.kikoplay.data.remote.model.DanmakuSource
@@ -17,6 +18,7 @@ import com.kiko.kikoplay.data.repository.WatchHistoryRepository
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuItem
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
+import com.kiko.kikoplay.util.CacheFileHelper
 import com.kiko.kikoplay.util.MediaUrlBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +26,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import java.io.File
 import javax.inject.Inject
 
 data class PlayerUiState(
@@ -53,7 +57,8 @@ class VideoPlayerViewModel @Inject constructor(
     private val mediaUrlBuilder: MediaUrlBuilder,
     private val watchHistoryRepository: WatchHistoryRepository,
     private val cacheRepository: CacheRepository,
-    private val connectionManager: ConnectionManager
+    private val connectionManager: ConnectionManager,
+    private val json: Json
 ) : ViewModel() {
 
     private val route = savedStateHandle.toRoute<VideoPlayerRoute>()
@@ -98,6 +103,17 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     private fun loadDanmaku() {
+        loadCachedDanmaku()?.let { cached ->
+            _uiState.update {
+                it.copy(
+                    danmakuItems = cached.items,
+                    danmakuSources = cached.sources,
+                    launchScripts = cached.launchScripts
+                )
+            }
+            return
+        }
+
         val pool = route.danmuPool
         if (pool.isNullOrBlank()) {
             if (uiState.value.sourceType == 0) loadLocalDanmaku()
@@ -126,6 +142,30 @@ class VideoPlayerViewModel @Inject constructor(
                 } catch (_: Exception) {}
             }
         }
+    }
+
+    private fun loadCachedDanmaku(): CachedDanmakuState? {
+        if (route.sourceType != 2) return null
+
+        val mediaPath = route.localPath ?: return null
+        val cacheFile = CacheFileHelper.getDanmakuCacheFile(route.mediaId, mediaPath)
+        if (!cacheFile.exists()) return null
+
+        return runCatching {
+            val payload = json.decodeFromString(
+                CachedDanmakuPayload.serializer(),
+                cacheFile.readText()
+            )
+            val items = when (payload.format) {
+                CachedDanmakuPayload.FORMAT_FULL -> DanmakuParser.parseFull(payload.comment)
+                else -> DanmakuParser.parseV3(payload.comment)
+            }
+            CachedDanmakuState(
+                items = items,
+                sources = payload.sources ?: emptyList(),
+                launchScripts = payload.launchScripts ?: emptyList()
+            )
+        }.getOrNull()
     }
 
     private fun loadLocalDanmaku() {
@@ -262,4 +302,10 @@ class VideoPlayerViewModel @Inject constructor(
             } catch (_: Exception) {}
         }
     }
+
+    private data class CachedDanmakuState(
+        val items: List<DanmakuItem>,
+        val sources: List<DanmakuSource>,
+        val launchScripts: List<String>
+    )
 }

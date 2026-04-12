@@ -181,6 +181,13 @@ private fun HistoryItem(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (item.isCached && item.sourceType != 1) {
+                        Text(
+                            text = "已缓存",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     if (item.duration > 0) {
                         LinearProgressIndicator(
                             progress = { (item.playTime.toFloat() / item.duration).coerceIn(0f, 1f) },

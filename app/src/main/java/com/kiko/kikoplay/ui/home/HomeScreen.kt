@@ -286,6 +286,14 @@ private fun RecentWatchCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (item.isCached && item.sourceType != 1) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "已缓存",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))

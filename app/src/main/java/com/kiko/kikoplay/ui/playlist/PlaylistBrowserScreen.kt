@@ -45,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,12 @@ fun PlaylistBrowserScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilterMenu by remember { mutableStateOf(false) }
+    val breadcrumbScrollState = rememberScrollState()
+
+    LaunchedEffect(uiState.pathStack) {
+        val target = if (uiState.pathStack.isEmpty()) 0 else breadcrumbScrollState.maxValue
+        breadcrumbScrollState.animateScrollTo(target)
+    }
 
     Scaffold(
         topBar = {
@@ -81,7 +88,7 @@ fun PlaylistBrowserScreen(
                 title = {
                     // Breadcrumb
                     Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        modifier = Modifier.horizontalScroll(breadcrumbScrollState),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(onClick = { viewModel.navigateToPathIndex(-1) }) {

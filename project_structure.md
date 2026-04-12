@@ -12,6 +12,7 @@ KikoPlay Android 是 KikoPlay PC 的局域网配套播放器客户端。
 - 弹幕加载、发送与基础设置
 - 观看历史记录
 - 视频缓存与后台下载
+- 缓存媒体的本地离线播放与弹幕复用
 
 ## 技术栈
 
@@ -180,10 +181,12 @@ com.kiko.kikoplay/
 │   │   │   ├── CacheTaskDao.kt
 │   │   │   ├── ConnectionDao.kt
 │   │   │   └── WatchHistoryDao.kt
-│   │   └── entity/
+│   │   ├── entity/
 │   │       ├── CacheTaskEntity.kt
 │   │       ├── ConnectionEntity.kt
 │   │       └── WatchHistoryEntity.kt
+│   │   └── model/
+│   │       └── CachedDanmakuPayload.kt
 │   ├── remote/
 │   │   ├── BaseUrlInterceptor.kt
 │   │   ├── ConnectionManager.kt
@@ -246,6 +249,7 @@ com.kiko.kikoplay/
 │       ├── Theme.kt
 │       └── Type.kt
 └── util/
+    ├── CacheFileHelper.kt
     ├── MediaUrlBuilder.kt
     └── NetworkScanner.kt
 ```
@@ -254,8 +258,8 @@ com.kiko.kikoplay/
 
 ### 应用入口
 
-- `KikoPlayApplication.kt`: Hilt 应用入口
-- `MainActivity.kt`: 根 Activity，承载 Scaffold、导航和底部栏
+- `KikoPlayApplication.kt`: Hilt 应用入口，同时提供 WorkManager 配置
+- `MainActivity.kt`: 根 Activity，承载 Scaffold、导航和底部栏，并展示缓存任务角标
 
 ### 依赖注入
 
@@ -271,22 +275,23 @@ com.kiko.kikoplay/
 
 ### UI 层
 
-- `ui/home`: 首页与观看历史入口
+- `ui/home`: 首页与观看历史入口，包含最近观看去重与缓存标记
 - `ui/connection`: 局域网连接管理
 - `ui/playlist`: PC 播放列表浏览
 - `ui/player`: 播放器、弹幕与截图片段交互
 - `ui/local`: 本地视频列表
-- `ui/cache`: 缓存任务管理
+- `ui/cache`: 缓存任务管理，展示下载进度与缓存大小
 - `ui/settings`: 应用设置
-- `ui/navigation`: 底部导航和路由
+- `ui/navigation`: 底部导航和路由，包含缓存任务气泡提示
 - `ui/theme`: Compose 主题配置
 
 ### 后台任务
 
-- `CacheDownloadWorker.kt`: 负责缓存下载、断点续传与后台执行
+- `CacheDownloadWorker.kt`: 负责缓存下载、断点续传、总大小探测与弹幕 sidecar 缓存
 
 ### 工具类
 
+- `CacheFileHelper.kt`: 统一生成缓存媒体对应的弹幕 sidecar 文件路径
 - `NetworkScanner.kt`: 局域网扫描
 - `MediaUrlBuilder.kt`: 构建媒体与字幕地址
 
@@ -342,3 +347,4 @@ app/src/androidTest/
 4. 播放手势控制尚未完全实现
 5. 缓存恢复下载仍缺少真机充分验证
 6. 首页目录快捷入口仍可继续优化
+7. 缓存总大小探测仍依赖服务端是否返回 `Content-Length` / `Content-Range`

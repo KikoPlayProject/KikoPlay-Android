@@ -11,6 +11,7 @@ import com.kiko.kikoplay.data.local.dao.CacheTaskDao
 import com.kiko.kikoplay.data.local.entity.CacheTaskEntity
 import com.kiko.kikoplay.data.remote.ConnectionManager
 import com.kiko.kikoplay.service.CacheDownloadWorker
+import com.kiko.kikoplay.util.CacheFileHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -21,6 +22,7 @@ import javax.inject.Singleton
 class CacheRepository @Inject constructor(
     private val cacheTaskDao: CacheTaskDao,
     private val connectionManager: ConnectionManager,
+    private val watchHistoryRepository: WatchHistoryRepository,
     @ApplicationContext private val context: Context
 ) {
     fun getActiveTasks(): Flow<List<CacheTaskEntity>> = cacheTaskDao.getActiveTasks()
@@ -63,7 +65,8 @@ class CacheRepository @Inject constructor(
             .putLong(CacheDownloadWorker.KEY_TASK_ID, taskId)
             .putString(CacheDownloadWorker.KEY_MEDIA_URL, mediaUrl)
             .putString(CacheDownloadWorker.KEY_OUTPUT_PATH, outputPath)
-            .putString("media_id", mediaId)
+            .putString(CacheDownloadWorker.KEY_MEDIA_ID, mediaId)
+            .putString(CacheDownloadWorker.KEY_DANMU_POOL, danmuPool)
             .build()
 
         val constraints = Constraints.Builder()
@@ -101,7 +104,8 @@ class CacheRepository @Inject constructor(
             .putLong(CacheDownloadWorker.KEY_TASK_ID, id)
             .putString(CacheDownloadWorker.KEY_MEDIA_URL, mediaUrl)
             .putString(CacheDownloadWorker.KEY_OUTPUT_PATH, outputPath)
-            .putString("media_id", task.mediaId)
+            .putString(CacheDownloadWorker.KEY_MEDIA_ID, task.mediaId)
+            .putString(CacheDownloadWorker.KEY_DANMU_POOL, task.danmuPool)
             .build()
 
         val constraints = Constraints.Builder()
@@ -122,8 +126,8 @@ class CacheRepository @Inject constructor(
     suspend fun cancelTask(entity: CacheTaskEntity) {
         WorkManager.getInstance(context).cancelAllWorkByTag("task_${entity.id}")
         cacheTaskDao.delete(entity)
-        // Delete partial file
-        entity.localPath?.let { File(it).delete() }
+        deleteCacheFiles(entity)
+        clearHistoryCachedState(entity)
     }
 
     suspend fun updateProgress(id: Long, bytes: Long) {
@@ -136,7 +140,8 @@ class CacheRepository @Inject constructor(
 
     suspend fun deleteCompleted(entity: CacheTaskEntity) {
         cacheTaskDao.delete(entity)
-        entity.localPath?.let { File(it).delete() }
+        deleteCacheFiles(entity)
+        clearHistoryCachedState(entity)
     }
 
     suspend fun getByMediaId(mediaId: String): CacheTaskEntity? {
@@ -155,5 +160,19 @@ class CacheRepository @Inject constructor(
         }
 
         return task
+    }
+
+    private fun deleteCacheFiles(entity: CacheTaskEntity) {
+        entity.localPath?.let { mediaPath ->
+            File(mediaPath).delete()
+            CacheFileHelper.getDanmakuCacheFile(entity.mediaId, mediaPath).delete()
+        }
+    }
+
+    private suspend fun clearHistoryCachedState(entity: CacheTaskEntity) {
+        watchHistoryRepository.clearCachedState(
+            mediaId = entity.mediaId,
+            serverAddress = entity.serverAddress
+        )
     }
 }
