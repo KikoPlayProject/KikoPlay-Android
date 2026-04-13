@@ -14,6 +14,7 @@ import com.kiko.kikoplay.data.remote.model.UpdateTimelineRequest
 import com.kiko.kikoplay.data.remote.model.ScreenshotRequest
 import com.kiko.kikoplay.data.remote.model.LaunchDanmakuRequest
 import com.kiko.kikoplay.data.repository.CacheRepository
+import com.kiko.kikoplay.data.repository.PlaylistRepository
 import com.kiko.kikoplay.data.repository.WatchHistoryRepository
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuItem
@@ -30,6 +31,16 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import javax.inject.Inject
 
+data class EpisodeUiItem(
+    val mediaId: String,
+    val title: String,
+    val danmuPool: String?,
+    val animeTitle: String?,
+    val playTimeState: Int?,
+    val playTimeSeconds: Double?,
+    val startPositionMs: Long
+)
+
 data class PlayerUiState(
     val mediaId: String = "",
     val title: String = "",
@@ -40,9 +51,13 @@ data class PlayerUiState(
     val mediaUrl: String = "",
     val subtitleUrl: String? = null,
     val subtitleFormat: String? = null,
+    val parentPath: List<Int> = emptyList(),
+    val startPositionMs: Long = 0L,
+    val initialPlayTimeState: Int = 0,
     val danmakuItems: List<DanmakuItem> = emptyList(),
     val danmakuSources: List<DanmakuSource> = emptyList(),
     val launchScripts: List<String> = emptyList(),
+    val episodes: List<EpisodeUiItem> = emptyList(),
     val isDanmakuLoading: Boolean = false,
     val isDanmakuVisible: Boolean = true,
     val isFullscreen: Boolean = false,
@@ -57,11 +72,12 @@ class VideoPlayerViewModel @Inject constructor(
     private val mediaUrlBuilder: MediaUrlBuilder,
     private val watchHistoryRepository: WatchHistoryRepository,
     private val cacheRepository: CacheRepository,
+    private val playlistRepository: PlaylistRepository,
     private val connectionManager: ConnectionManager,
     private val json: Json
 ) : ViewModel() {
-
     private val route = savedStateHandle.toRoute<VideoPlayerRoute>()
+    val parentPath: List<Int> get() = uiState.value.parentPath
 
     private val _uiState = MutableStateFlow(
         PlayerUiState(
@@ -71,6 +87,9 @@ class VideoPlayerViewModel @Inject constructor(
             danmuPool = route.danmuPool,
             sourceType = route.sourceType,
             localPath = route.localPath,
+            parentPath = route.parentPath,
+            startPositionMs = route.startPositionMs,
+            initialPlayTimeState = route.initialPlayTimeState,
             mediaUrl = when (route.sourceType) {
                 1 -> route.localPath ?: ""
                 2 -> route.localPath ?: ""
@@ -81,8 +100,61 @@ class VideoPlayerViewModel @Inject constructor(
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
     init {
+        loadEpisodes()
         loadSubtitle()
         loadDanmaku()
+    }
+
+    private fun loadEpisodes() {
+        if (route.sourceType != 0) return
+        viewModelScope.launch {
+            val initialPath = uiState.value.parentPath
+            var resolvedPath = initialPath
+
+            var nodes = playlistRepository.getNodeAtPath(resolvedPath)
+            if (nodes == null || (resolvedPath.isEmpty() && nodes.none { it.mediaId == route.mediaId || it.nodes != null })) {
+                val playlistResult = playlistRepository.ensurePlaylistLoaded()
+                if (playlistResult.isFailure) return@launch
+                resolvedPath = playlistRepository.findParentPathByMediaId(route.mediaId) ?: initialPath
+                nodes = playlistRepository.getNodeAtPath(resolvedPath)
+            } else if (resolvedPath.isEmpty()) {
+                val inferredPath = playlistRepository.findParentPathByMediaId(route.mediaId)
+                if (inferredPath != null) {
+                    resolvedPath = inferredPath
+                    nodes = playlistRepository.getNodeAtPath(resolvedPath)
+                }
+            }
+
+            val episodes = mapEpisodes(nodes.orEmpty())
+            _uiState.update {
+                it.copy(
+                    parentPath = resolvedPath,
+                    episodes = episodes
+                )
+            }
+        }
+    }
+
+    private fun mapEpisodes(nodes: List<com.kiko.kikoplay.data.remote.model.PlaylistNode>): List<EpisodeUiItem> {
+        return nodes
+            .asSequence()
+            .filterNot { it.isFolder }
+            .mapNotNull { node ->
+                val mediaId = node.mediaId ?: return@mapNotNull null
+                EpisodeUiItem(
+                    mediaId = mediaId,
+                    title = node.text,
+                    danmuPool = node.danmuPool,
+                    animeTitle = node.animeName,
+                    playTimeState = node.playTimeState,
+                    playTimeSeconds = node.playTime,
+                    startPositionMs = normalizeResumePositionMs(
+                        playTimeSeconds = node.playTime,
+                        playTimeState = node.playTimeState
+                    )
+                )
+            }
+            .toList()
     }
 
     private fun loadSubtitle() {
@@ -194,7 +266,27 @@ class VideoPlayerViewModel @Inject constructor(
         _uiState.update { it.copy(controlsVisible = visible) }
     }
 
-    fun syncPlayTime(playTime: Double, playTimeState: Int, durationMs: Long = 0) {
+    fun syncPlayTime(positionMs: Long, playTimeState: Int, durationMs: Long = 0) {
+        val safePositionMs = positionMs.coerceAtLeast(0L)
+        val playTimeSeconds = safePositionMs / 1000.0
+        if (route.sourceType == 0) {
+            playlistRepository.updateNodeProgress(route.mediaId, playTimeSeconds, playTimeState)
+        }
+        _uiState.update { state ->
+            state.copy(
+                episodes = state.episodes.map { episode ->
+                    if (episode.mediaId == route.mediaId) {
+                        episode.copy(
+                            playTimeState = playTimeState,
+                            playTimeSeconds = playTimeSeconds,
+                            startPositionMs = safePositionMs
+                        )
+                    } else {
+                        episode
+                    }
+                }
+            )
+        }
         // Record watch history
         viewModelScope.launch {
             try {
@@ -221,7 +313,7 @@ class VideoPlayerViewModel @Inject constructor(
                     mediaId = route.mediaId,
                     title = route.title,
                     animeTitle = route.animeTitle,
-                    playTime = (playTime * 1000).toLong(),
+                    playTime = safePositionMs,
                     duration = durationMs,
                     playTimeState = playTimeState,
                     sourceType = route.sourceType,
@@ -240,7 +332,7 @@ class VideoPlayerViewModel @Inject constructor(
                 api.updatePlayTime(
                     UpdateTimeRequest(
                         mediaId = route.mediaId,
-                        playTime = playTime,
+                        playTime = playTimeSeconds,
                         playTimeState = playTimeState
                     )
                 )
@@ -308,4 +400,12 @@ class VideoPlayerViewModel @Inject constructor(
         val sources: List<DanmakuSource>,
         val launchScripts: List<String>
     )
+
+    private fun normalizeResumePositionMs(
+        playTimeSeconds: Double?,
+        playTimeState: Int?
+    ): Long {
+        if (playTimeState == 2) return 0L
+        return ((playTimeSeconds ?: 0.0) * 1000).toLong()
+    }
 }

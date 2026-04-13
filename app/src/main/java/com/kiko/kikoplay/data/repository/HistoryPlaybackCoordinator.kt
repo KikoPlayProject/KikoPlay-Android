@@ -11,7 +11,9 @@ data class HistoryPlaybackTarget(
     val sourceType: Int,
     val danmuPool: String?,
     val animeTitle: String?,
-    val localPath: String? = null
+    val localPath: String? = null,
+    val startPositionMs: Long = 0L,
+    val initialPlayTimeState: Int = 0
 )
 
 data class SwitchConnectionRequest(
@@ -89,7 +91,9 @@ class HistoryPlaybackCoordinator @Inject constructor(
             sourceType = SOURCE_TYPE_CACHE,
             danmuPool = item.danmuPool,
             animeTitle = item.animeTitle,
-            localPath = cacheTask.localPath
+            localPath = cacheTask.localPath,
+            startPositionMs = normalizeResumePositionMs(item.playTime, item.playTimeState),
+            initialPlayTimeState = item.playTimeState
         )
     }
 
@@ -103,7 +107,9 @@ class HistoryPlaybackCoordinator @Inject constructor(
                 sourceType = SOURCE_TYPE_LOCAL,
                 danmuPool = item.danmuPool,
                 animeTitle = item.animeTitle,
-                localPath = localPath
+                localPath = localPath,
+                startPositionMs = normalizeResumePositionMs(item.playTime, item.playTimeState),
+                initialPlayTimeState = item.playTimeState
             )
             item.isCached || item.sourceType == SOURCE_TYPE_CACHE -> HistoryPlaybackTarget(
                 mediaId = item.mediaId,
@@ -111,7 +117,9 @@ class HistoryPlaybackCoordinator @Inject constructor(
                 sourceType = SOURCE_TYPE_CACHE,
                 danmuPool = item.danmuPool,
                 animeTitle = item.animeTitle,
-                localPath = localPath
+                localPath = localPath,
+                startPositionMs = normalizeResumePositionMs(item.playTime, item.playTimeState),
+                initialPlayTimeState = item.playTimeState
             )
             else -> null
         }
@@ -134,8 +142,14 @@ class HistoryPlaybackCoordinator @Inject constructor(
             title = title,
             sourceType = SOURCE_TYPE_PC,
             danmuPool = danmuPool,
-            animeTitle = animeTitle
+            animeTitle = animeTitle,
+            startPositionMs = normalizeResumePositionMs(playTime, playTimeState),
+            initialPlayTimeState = playTimeState
         )
+    }
+
+    private fun normalizeResumePositionMs(playTimeMs: Long, playTimeState: Int): Long {
+        return if (playTimeState == 2) 0L else playTimeMs
     }
 
     private companion object {

@@ -47,6 +47,7 @@ class PlaylistBrowserViewModel @Inject constructor(
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
 
     init {
+        observePlaylistProgressUpdates()
         loadPlaylist()
     }
 
@@ -199,6 +200,31 @@ class PlaylistBrowserViewModel @Inject constructor(
             }
             clearSelection()
             loadPlaylist()
+        }
+    }
+
+    private fun observePlaylistProgressUpdates() {
+        viewModelScope.launch {
+            playlistRepository.progressUpdates.collect {
+                refreshCurrentItemsFromCache()
+            }
+        }
+    }
+
+    private fun refreshCurrentItemsFromCache() {
+        val state = _uiState.value
+        val rawItems = if (state.pathStack.isEmpty()) {
+            playlistRepository.getCachedPlaylist() ?: return
+        } else {
+            val indices = state.pathStack.map { item -> item.index }
+            playlistRepository.getNodeAtPath(indices) ?: return
+        }
+        _uiState.update {
+            val refreshedItems = applyFilter(rawItems, it.filter)
+            it.copy(
+                currentItems = refreshedItems,
+                selectedIndices = it.selectedIndices.filter { index -> index in refreshedItems.indices }.toSet()
+            )
         }
     }
 

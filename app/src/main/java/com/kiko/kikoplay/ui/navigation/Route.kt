@@ -27,7 +27,10 @@ data class VideoPlayerRoute(
     val sourceType: Int = 0, // 0=PC, 1=local, 2=cached
     val danmuPool: String? = null,
     val animeTitle: String? = null,
-    val localPath: String? = null
+    val localPath: String? = null,
+    val parentPath: List<Int> = emptyList(),
+    val startPositionMs: Long = 0L,
+    val initialPlayTimeState: Int = 0
 )
 
 @Serializable

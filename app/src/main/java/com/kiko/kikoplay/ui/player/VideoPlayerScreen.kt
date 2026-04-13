@@ -34,10 +34,15 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
+import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +61,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +88,7 @@ import master.flame.danmaku.ui.widget.DanmakuView
 @Composable
 fun VideoPlayerScreen(
     onBack: () -> Unit,
+    onPlayMedia: (mediaId: String, title: String, danmuPool: String?, animeTitle: String?, parentPath: List<Int>, startPositionMs: Long, initialPlayTimeState: Int) -> Unit,
     viewModel: VideoPlayerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -102,9 +109,14 @@ fun VideoPlayerScreen(
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isBuffering by remember { mutableStateOf(true) }
+    var autoAdvanceHandled by remember(uiState.mediaId) { mutableStateOf(false) }
+    val latestUiState by rememberUpdatedState(uiState)
+    val latestCurrentPosition by rememberUpdatedState(currentPosition)
+    val latestDuration by rememberUpdatedState(duration)
+    val latestOnPlayMedia by rememberUpdatedState(onPlayMedia)
 
     // Set media source with subtitle
-    LaunchedEffect(uiState.mediaUrl, uiState.subtitleUrl) {
+    LaunchedEffect(uiState.mediaUrl, uiState.subtitleUrl, uiState.startPositionMs) {
         if (uiState.mediaUrl.isNotBlank()) {
             val builder = MediaItem.Builder().setUri(uiState.mediaUrl)
             if (!uiState.subtitleUrl.isNullOrBlank()) {
@@ -119,6 +131,9 @@ fun VideoPlayerScreen(
                 builder.setSubtitleConfigurations(listOf(subtitle))
             }
             exoPlayer.setMediaItem(builder.build())
+            if (uiState.startPositionMs > 0L) {
+                exoPlayer.seekTo(uiState.startPositionMs)
+            }
             exoPlayer.prepare()
         }
     }
@@ -134,11 +149,40 @@ fun VideoPlayerScreen(
         }
     }
 
+    DisposableEffect(exoPlayer, uiState.mediaId) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState != Player.STATE_ENDED || autoAdvanceHandled) return
+
+                autoAdvanceHandled = true
+                val finalPosition = latestDuration.takeIf { it > 0L } ?: latestCurrentPosition
+                val finalState = playbackState(finalPosition, latestDuration, latestUiState.initialPlayTimeState)
+                viewModel.syncPlayTime(finalPosition, finalState, latestDuration)
+
+                val nextEpisode = latestUiState.episodes.nextEpisodeAfter(latestUiState.mediaId) ?: return
+                latestOnPlayMedia(
+                    nextEpisode.mediaId,
+                    nextEpisode.title,
+                    nextEpisode.danmuPool,
+                    nextEpisode.animeTitle,
+                    viewModel.parentPath,
+                    nextEpisode.startPositionMs,
+                    nextEpisode.playTimeState ?: 0
+                )
+            }
+        }
+
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+        }
+    }
+
     // Sync play time on pause/stop
     LaunchedEffect(isPlaying) {
         if (!isPlaying && currentPosition > 0) {
-            val state = playbackState(currentPosition, duration)
-            viewModel.syncPlayTime(currentPosition / 1000.0, state, duration)
+            val state = playbackState(currentPosition, duration, uiState.initialPlayTimeState)
+            viewModel.syncPlayTime(currentPosition, state, duration)
         }
     }
 
@@ -146,8 +190,8 @@ fun VideoPlayerScreen(
     DisposableEffect(Unit) {
         onDispose {
             if (currentPosition > 0) {
-                val state = playbackState(currentPosition, duration)
-                viewModel.syncPlayTime(currentPosition / 1000.0, state, duration)
+                val state = playbackState(currentPosition, duration, uiState.initialPlayTimeState)
+                viewModel.syncPlayTime(currentPosition, state, duration)
             }
             exoPlayer.release()
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -426,9 +470,25 @@ fun VideoPlayerScreen(
 
             // Content info below player
             PlayerContentInfo(
+                currentMediaId = uiState.mediaId,
+                currentPositionMs = currentPosition,
                 title = uiState.title,
                 animeTitle = uiState.animeTitle,
+                episodes = uiState.episodes,
                 danmakuSources = uiState.danmakuSources,
+                onPlayEpisode = { episode ->
+                    val state = playbackState(currentPosition, duration, uiState.initialPlayTimeState)
+                    viewModel.syncPlayTime(currentPosition, state, duration)
+                    onPlayMedia(
+                        episode.mediaId,
+                        episode.title,
+                        episode.danmuPool,
+                        episode.animeTitle,
+                        viewModel.parentPath,
+                        episode.startPositionMs,
+                        episode.playTimeState ?: 0
+                    )
+                },
                 onRefreshDanmaku = { viewModel.refreshDanmaku() },
                 onUpdateDelay = { id, delay -> viewModel.updateSourceDelay(id, delay) },
                 modifier = Modifier.weight(1f)
@@ -620,9 +680,13 @@ private fun PlayerControlsOverlay(
 
 @Composable
 private fun PlayerContentInfo(
+    currentMediaId: String,
+    currentPositionMs: Long,
     title: String,
     animeTitle: String?,
+    episodes: List<EpisodeUiItem>,
     danmakuSources: List<com.kiko.kikoplay.data.remote.model.DanmakuSource>,
+    onPlayEpisode: (EpisodeUiItem) -> Unit,
     onRefreshDanmaku: () -> Unit,
     onUpdateDelay: (Int, Long) -> Unit,
     modifier: Modifier = Modifier
@@ -657,12 +721,29 @@ private fun PlayerContentInfo(
 
         when (selectedTab) {
             0 -> {
-                // Episodes placeholder
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("剧集列表将在后续版本完善", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (episodes.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("当前目录没有可播放的视频条目", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        itemsIndexed(episodes, key = { _, episode -> episode.mediaId }) { _, episode ->
+                            val isCurrent = episode.mediaId == currentMediaId
+                            EpisodeListItem(
+                                episode = episode,
+                                isCurrent = isCurrent,
+                                currentPositionMs = if (isCurrent) currentPositionMs else null,
+                                onClick = { onPlayEpisode(episode) }
+                            )
+                        }
+                        item { Spacer(Modifier.height(8.dp)) }
+                    }
                 }
             }
             1 -> {
@@ -700,6 +781,88 @@ private fun PlayerContentInfo(
     }
 }
 
+@Composable
+private fun EpisodeListItem(
+    episode: EpisodeUiItem,
+    isCurrent: Boolean,
+    currentPositionMs: Long?,
+    onClick: () -> Unit
+) {
+    val displayPlayTimeMs = currentPositionMs ?: episode.startPositionMs
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .clickable(enabled = !isCurrent, onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isCurrent) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.VideoFile,
+                contentDescription = null,
+                tint = episodePlayStateColor(episode.playTimeState),
+                modifier = Modifier.size(28.dp)
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = episode.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (displayPlayTimeMs > 0L) {
+                    Text(
+                        text = formatEpisodeDuration(displayPlayTimeMs / 1000),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            EpisodePlayStateIcon(episode.playTimeState)
+        }
+    }
+}
+
+@Composable
+private fun EpisodePlayStateIcon(state: Int?) {
+    val (icon, tint) = when (state) {
+        2 -> Icons.Default.CheckCircle to MaterialTheme.colorScheme.primary
+        1 -> Icons.Default.PlayCircle to MaterialTheme.colorScheme.tertiary
+        else -> return
+    }
+    Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = tint)
+}
+
+private fun episodePlayStateColor(state: Int?): Color {
+    return when (state) {
+        2 -> Color(0xFF4CAF50)
+        1 -> Color(0xFFFFC107)
+        else -> Color(0xFF9E9E9E)
+    }
+}
+
+private fun formatEpisodeDuration(seconds: Long): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
+    else String.format("%d:%02d", m, s)
+}
+
 private fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
     val h = totalSeconds / 3600
@@ -709,8 +872,15 @@ private fun formatTime(ms: Long): String {
     else String.format("%d:%02d", m, s)
 }
 
-private fun playbackState(currentPosition: Long, duration: Long): Int {
-    if (currentPosition <= 0) return 0
-    if (duration > 0 && currentPosition >= duration - 5000) return 2
+private fun playbackState(currentPosition: Long, duration: Long, initialPlayTimeState: Int): Int {
+    if (initialPlayTimeState == 2 && currentPosition < 15_000L) return 2
+    if (currentPosition < 15_000L) return 0
+    if (duration > 0 && duration - currentPosition < 15_000L) return 2
     return 1
+}
+
+private fun List<EpisodeUiItem>.nextEpisodeAfter(currentMediaId: String): EpisodeUiItem? {
+    val currentIndex = indexOfFirst { it.mediaId == currentMediaId }
+    if (currentIndex < 0) return null
+    return getOrNull(currentIndex + 1)
 }

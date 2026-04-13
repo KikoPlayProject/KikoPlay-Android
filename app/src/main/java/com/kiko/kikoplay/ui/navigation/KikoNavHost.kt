@@ -36,7 +36,9 @@ fun KikoNavHost(
                             sourceType = target.sourceType,
                             danmuPool = target.danmuPool,
                             animeTitle = target.animeTitle,
-                            localPath = target.localPath
+                            localPath = target.localPath,
+                            startPositionMs = target.startPositionMs,
+                            initialPlayTimeState = target.initialPlayTimeState
                         )
                     )
                 },
@@ -52,7 +54,9 @@ fun KikoNavHost(
                             mediaId = mediaId,
                             title = title,
                             sourceType = 1,
-                            localPath = localPath
+                            localPath = localPath,
+                            startPositionMs = 0L,
+                            initialPlayTimeState = 0
                         )
                     )
                 }
@@ -68,7 +72,9 @@ fun KikoNavHost(
                             title = title,
                             sourceType = 2,
                             danmuPool = danmuPool,
-                            localPath = localPath
+                            localPath = localPath,
+                            startPositionMs = 0L,
+                            initialPlayTimeState = 0
                         )
                     )
                 }
@@ -93,13 +99,16 @@ fun KikoNavHost(
         composable<PlaylistBrowserRoute> {
             PlaylistBrowserScreen(
                 onBack = { navController.popBackStack() },
-                onPlayMedia = { mediaId, title, danmuPool, animeTitle ->
+                onPlayMedia = { mediaId, title, danmuPool, animeTitle, parentPath, startPositionMs, initialPlayTimeState ->
                     navController.navigate(
                         VideoPlayerRoute(
                             mediaId = mediaId,
                             title = title,
                             danmuPool = danmuPool,
-                            animeTitle = animeTitle
+                            animeTitle = animeTitle,
+                            parentPath = parentPath,
+                            startPositionMs = startPositionMs,
+                            initialPlayTimeState = initialPlayTimeState
                         )
                     )
                 }
@@ -108,7 +117,21 @@ fun KikoNavHost(
 
         composable<VideoPlayerRoute> {
             VideoPlayerScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onPlayMedia = { mediaId, title, danmuPool, animeTitle, parentPath, startPositionMs, initialPlayTimeState ->
+                    navController.popBackStack()
+                    navController.navigate(
+                        VideoPlayerRoute(
+                            mediaId = mediaId,
+                            title = title,
+                            danmuPool = danmuPool,
+                            animeTitle = animeTitle,
+                            parentPath = parentPath,
+                            startPositionMs = startPositionMs,
+                            initialPlayTimeState = initialPlayTimeState
+                        )
+                    )
+                }
             )
         }
 
@@ -123,7 +146,9 @@ fun KikoNavHost(
                             sourceType = target.sourceType,
                             danmuPool = target.danmuPool,
                             animeTitle = target.animeTitle,
-                            localPath = target.localPath
+                            localPath = target.localPath,
+                            startPositionMs = target.startPositionMs,
+                            initialPlayTimeState = target.initialPlayTimeState
                         )
                     )
                 }

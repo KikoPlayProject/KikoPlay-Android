@@ -2,14 +2,25 @@ package com.kiko.kikoplay.data.repository
 
 import com.kiko.kikoplay.data.remote.KikoPlayApi
 import com.kiko.kikoplay.data.remote.model.PlaylistNode
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import javax.inject.Inject
 import javax.inject.Singleton
+
+data class PlaylistProgressUpdate(
+    val mediaId: String,
+    val playTimeSeconds: Double,
+    val playTimeState: Int
+)
 
 @Singleton
 class PlaylistRepository @Inject constructor(
     private val api: KikoPlayApi
 ) {
     private var cachedPlaylist: List<PlaylistNode>? = null
+    private val _progressUpdates = MutableSharedFlow<PlaylistProgressUpdate>(extraBufferCapacity = 16)
+    val progressUpdates: SharedFlow<PlaylistProgressUpdate> = _progressUpdates.asSharedFlow()
 
     suspend fun fetchPlaylist(): Result<List<PlaylistNode>> {
         return try {
@@ -19,6 +30,10 @@ class PlaylistRepository @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun ensurePlaylistLoaded(): Result<List<PlaylistNode>> {
+        return cachedPlaylist?.let { Result.success(it) } ?: fetchPlaylist()
     }
 
     fun getCachedPlaylist(): List<PlaylistNode>? = cachedPlaylist
@@ -42,7 +57,95 @@ class PlaylistRepository @Inject constructor(
         return node
     }
 
+    fun findParentPathByMediaId(mediaId: String): List<Int>? {
+        val playlist = cachedPlaylist ?: return null
+        return findParentPathRecursive(
+            nodes = playlist,
+            mediaId = mediaId,
+            parentPath = emptyList()
+        )
+    }
+
+    fun updateNodeProgress(
+        mediaId: String,
+        playTimeSeconds: Double,
+        playTimeState: Int
+    ) {
+        val playlist = cachedPlaylist ?: return
+        val (updated, changed) = updateNodeProgressRecursive(
+            nodes = playlist,
+            mediaId = mediaId,
+            playTimeSeconds = playTimeSeconds,
+            playTimeState = playTimeState
+        )
+        if (!changed) return
+        cachedPlaylist = updated
+        _progressUpdates.tryEmit(
+            PlaylistProgressUpdate(
+                mediaId = mediaId,
+                playTimeSeconds = playTimeSeconds,
+                playTimeState = playTimeState
+            )
+        )
+    }
+
     fun clearCache() {
         cachedPlaylist = null
+    }
+
+    private fun updateNodeProgressRecursive(
+        nodes: List<PlaylistNode>,
+        mediaId: String,
+        playTimeSeconds: Double,
+        playTimeState: Int
+    ): Pair<List<PlaylistNode>, Boolean> {
+        var changed = false
+        val updatedNodes = nodes.map { node ->
+            when {
+                node.mediaId == mediaId && !node.isFolder -> {
+                    changed = true
+                    node.copy(playTime = playTimeSeconds, playTimeState = playTimeState)
+                }
+                node.nodes != null -> {
+                    val (updatedChildren, childChanged) = updateNodeProgressRecursive(
+                        nodes = node.nodes,
+                        mediaId = mediaId,
+                        playTimeSeconds = playTimeSeconds,
+                        playTimeState = playTimeState
+                    )
+                    if (childChanged) {
+                        changed = true
+                        node.copy(nodes = updatedChildren)
+                    } else {
+                        node
+                    }
+                }
+                else -> node
+            }
+        }
+        return updatedNodes to changed
+    }
+
+    private fun findParentPathRecursive(
+        nodes: List<PlaylistNode>,
+        mediaId: String,
+        parentPath: List<Int>
+    ): List<Int>? {
+        nodes.forEachIndexed { index, node ->
+            if (node.mediaId == mediaId && !node.isFolder) {
+                return parentPath
+            }
+            val childPath = node.nodes?.let { children ->
+                findParentPathRecursive(
+                    nodes = children,
+                    mediaId = mediaId,
+                    parentPath = parentPath + index
+                )
+            }
+            if (childPath != null) {
+                return childPath
+            }
+        }
+        return null
     }
 }

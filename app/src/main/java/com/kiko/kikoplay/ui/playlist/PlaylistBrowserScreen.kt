@@ -70,7 +70,7 @@ import com.kiko.kikoplay.ui.theme.MarkerYellow
 @Composable
 fun PlaylistBrowserScreen(
     onBack: () -> Unit,
-    onPlayMedia: (mediaId: String, title: String, danmuPool: String?, animeTitle: String?) -> Unit,
+    onPlayMedia: (mediaId: String, title: String, danmuPool: String?, animeTitle: String?, parentPath: List<Int>, startPositionMs: Long, initialPlayTimeState: Int) -> Unit,
     viewModel: PlaylistBrowserViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -194,7 +194,13 @@ fun PlaylistBrowserScreen(
                                             node.mediaId ?: return@PlaylistItemCard,
                                             node.text,
                                             node.danmuPool,
-                                            node.animeName
+                                            node.animeName,
+                                            uiState.pathStack.map { it.index },
+                                            normalizeResumePositionMs(
+                                                playTimeSeconds = node.playTime,
+                                                playTimeState = node.playTimeState
+                                            ),
+                                            node.playTimeState ?: 0
                                         )
                                     }
                                 },
@@ -368,4 +374,12 @@ private fun formatDuration(seconds: Long): String {
     val s = seconds % 60
     return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
     else String.format("%d:%02d", m, s)
+}
+
+private fun normalizeResumePositionMs(
+    playTimeSeconds: Double?,
+    playTimeState: Int?
+): Long {
+    if (playTimeState == 2) return 0L
+    return ((playTimeSeconds ?: 0.0) * 1000).toLong()
 }
