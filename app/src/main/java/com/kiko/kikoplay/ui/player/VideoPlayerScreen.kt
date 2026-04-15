@@ -8,10 +8,12 @@ import android.provider.Settings
 import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -69,6 +72,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -78,6 +82,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import kotlinx.coroutines.delay
 import master.flame.danmaku.danmaku.model.BaseDanmaku
@@ -302,6 +307,10 @@ fun VideoPlayerScreen(
         danmakuContext.setDanmakuTransparency(danmakuSettings.alpha)
         danmakuContext.setScaleTextSize(danmakuSettings.fontSize)
         danmakuContext.setScrollSpeedFactor(1f / danmakuSettings.speed)
+        danmakuContext.setR2LDanmakuVisibility(danmakuSettings.showScroll)
+        danmakuContext.setL2RDanmakuVisibility(danmakuSettings.showScroll)
+        danmakuContext.setFTDanmakuVisibility(danmakuSettings.showTop)
+        danmakuContext.setFBDanmakuVisibility(danmakuSettings.showBottom)
         danmakuContext.setMaximumVisibleSizeInScreen(
             if (danmakuSettings.displayArea < 1f) (danmakuSettings.displayArea * 100).toInt() else -1
         )
@@ -391,6 +400,16 @@ fun VideoPlayerScreen(
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center).size(48.dp),
                     color = Color.White
+                )
+            }
+
+            if (showDanmakuSettings) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures { showDanmakuSettings = false }
+                        }
                 )
             }
 
@@ -571,16 +590,18 @@ private fun PlayerControlsOverlay(
     onDanmakuSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier.background(Color.Black.copy(alpha = 0.3f))) {
+    val isPortraitControls = !isFullscreen
+
+    Box(modifier = modifier.background(Color.Black.copy(alpha = 0.24f))) {
         // Top bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopStart)
-                .padding(8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color.White)
             }
             Text(
@@ -591,14 +612,76 @@ private fun PlayerControlsOverlay(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            if (isFullscreen) {
-                IconButton(onClick = onScreenshot) {
+            IconButton(onClick = onScreenshot, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.CameraAlt, "截图", tint = Color.White)
                 }
-            }
         }
 
         // Bottom bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CompactControlButton(onClick = onPlayPause) {
+                Icon(
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "暂停" else "播放",
+                    tint = Color.White
+                )
+            }
+
+            CompactControlButton(onClick = onToggleDanmaku) {
+                Icon(
+                    if (isDanmakuVisible) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
+                    contentDescription = "弹幕开关",
+                    tint = if (isDanmakuVisible) Color.White else Color.White.copy(alpha = 0.5f)
+                )
+            }
+
+            SlimPlayerSeekBar(
+                currentPosition = currentPosition,
+                duration = duration,
+                onSeek = onSeek,
+                modifier = Modifier.weight(1f)
+            )
+
+            Text(
+                text = "${formatTime(currentPosition)} / ${formatTime(duration)}",
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.widthIn(min = if (isPortraitControls) 70.dp else 80.dp)
+            )
+
+            CompactControlButton(onClick = onSendDanmaku) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "发送弹幕",
+                    tint = Color.White
+                )
+            }
+
+            if (!isPortraitControls) {
+                CompactControlButton(onClick = onDanmakuSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "弹幕设置", tint = Color.White)
+                }
+            }
+
+            CompactControlButton(onClick = onToggleFullscreen) {
+                Icon(
+                    if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = "全屏",
+                    tint = Color.White
+                )
+            }
+        }
+
+        if (false) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -675,7 +758,59 @@ private fun PlayerControlsOverlay(
                 }
             }
         }
+        }
     }
+}
+
+@Composable
+private fun CompactControlButton(
+    onClick: () -> Unit,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = content
+    )
+}
+
+@Composable
+private fun SlimPlayerSeekBar(
+    currentPosition: Long,
+    duration: Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val maxValue = duration.toFloat().coerceAtLeast(1f)
+    var sliderPosition by remember { mutableFloatStateOf(0f) }
+    var isScrubbing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentPosition, maxValue, isScrubbing) {
+        if (!isScrubbing) {
+            sliderPosition = currentPosition.toFloat().coerceIn(0f, maxValue)
+        }
+    }
+
+    KikoSlider(
+        value = sliderPosition,
+        onValueChange = {
+            isScrubbing = true
+            sliderPosition = it.coerceIn(0f, maxValue)
+        },
+        onValueChangeFinished = {
+            isScrubbing = false
+            onSeek(sliderPosition.toLong())
+        },
+        valueRange = 0f..maxValue,
+        modifier = modifier,
+        activeColor = MaterialTheme.colorScheme.primary,
+        inactiveColor = Color.White.copy(alpha = 0.28f),
+        thumbDiameter = 10.dp,
+        draggingThumbDiameter = 12.dp,
+        sliderHeight = 18.dp
+    )
 }
 
 @Composable

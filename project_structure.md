@@ -233,6 +233,7 @@ com.kiko.kikoplay/
 │   │   ├── VideoPlayerScreen.kt
 │   │   ├── VideoPlayerViewModel.kt
 │   │   ├── components/
+│   │   │   ├── KikoSlider.kt
 │   │   │   └── ScreenshotClipDialog.kt
 │   │   └── danmaku/
 │   │       ├── DanmakuParser.kt
@@ -278,7 +279,7 @@ com.kiko.kikoplay/
 - `ui/home`: 首页与观看历史入口，包含最近观看去重、缓存标记与恢复播放
 - `ui/connection`: 局域网连接管理
 - `ui/playlist`: PC 播放列表浏览，支持 breadcrumb 自动滚动与本地播放进度联动
-- `ui/player`: 播放器、同目录剧集列表、续播进度同步、自动下一集、弹幕与截图片段交互
+- `ui/player`: 播放器、同目录剧集列表、续播进度同步、自动下一集、弹幕与截图片段交互，包含播放器与弹幕设置复用的自定义滑杆组件
 - `ui/local`: 本地视频列表
 - `ui/cache`: 缓存任务管理，展示下载进度与缓存大小
 - `ui/settings`: 应用设置
