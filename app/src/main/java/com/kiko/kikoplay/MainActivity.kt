@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -20,10 +23,12 @@ import com.kiko.kikoplay.data.repository.ConnectionRepository
 import com.kiko.kikoplay.ui.navigation.KikoBottomBar
 import com.kiko.kikoplay.ui.navigation.KikoNavHost
 import com.kiko.kikoplay.ui.navigation.TopLevelDestination
+import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.theme.KikoPlayTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
+import androidx.compose.ui.unit.dp
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -47,6 +52,7 @@ class MainActivity : ComponentActivity() {
                 val activeCacheTasks by cacheRepository
                     .getActiveTasks()
                     .collectAsStateWithLifecycle(initialValue = emptyList())
+                val isPlayerRoute = currentDestination?.hasRoute(VideoPlayerRoute::class) == true
 
                 // Hide bottom bar on secondary pages
                 val showBottomBar = TopLevelDestination.entries.any { dest ->
@@ -55,6 +61,7 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
+                    contentWindowInsets = if (isPlayerRoute) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars,
                     bottomBar = {
                         if (showBottomBar) {
                             KikoBottomBar(
@@ -75,7 +82,7 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     KikoNavHost(
                         navController = navController,
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(if (isPlayerRoute) PaddingValues(0.dp) else innerPadding)
                     )
                 }
             }

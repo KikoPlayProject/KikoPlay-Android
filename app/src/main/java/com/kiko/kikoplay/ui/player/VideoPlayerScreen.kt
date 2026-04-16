@@ -1,18 +1,16 @@
 package com.kiko.kikoplay.ui.player
 
 import android.app.Activity
-import android.content.Context
-import android.content.pm.ActivityInfo
 import android.media.AudioManager
-import android.provider.Settings
-import android.view.WindowManager
+import android.graphics.Matrix
+import android.content.pm.ActivityInfo
+import android.view.View
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
@@ -68,26 +65,46 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import master.flame.danmaku.danmaku.model.BaseDanmaku
 import master.flame.danmaku.danmaku.model.android.DanmakuContext
 import master.flame.danmaku.ui.widget.DanmakuView
+
+private enum class GestureOverlayMode {
+    Seek,
+    Brightness,
+    Volume,
+    Speed
+}
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -101,6 +118,7 @@ fun VideoPlayerScreen(
     val activity = context as? Activity
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val audioManager = remember { context.getSystemService(Activity.AUDIO_SERVICE) as AudioManager }
 
     // ExoPlayer
     val exoPlayer = remember {
@@ -114,6 +132,7 @@ fun VideoPlayerScreen(
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isBuffering by remember { mutableStateOf(true) }
+    var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
     var autoAdvanceHandled by remember(uiState.mediaId) { mutableStateOf(false) }
     val latestUiState by rememberUpdatedState(uiState)
     val latestCurrentPosition by rememberUpdatedState(currentPosition)
@@ -175,6 +194,10 @@ fun VideoPlayerScreen(
                     nextEpisode.playTimeState ?: 0
                 )
             }
+
+            override fun onVideoSizeChanged(newVideoSize: VideoSize) {
+                videoSize = newVideoSize
+            }
         }
 
         exoPlayer.addListener(listener)
@@ -200,6 +223,45 @@ fun VideoPlayerScreen(
             }
             exoPlayer.release()
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    DisposableEffect(activity, isLandscape, uiState.isFullscreen) {
+        val currentActivity = activity
+        val window = currentActivity?.window
+        val decorView = window?.decorView
+        val fullscreen = isLandscape || uiState.isFullscreen
+        val controller = if (window != null && decorView != null) {
+            WindowCompat.getInsetsController(window, decorView)
+        } else {
+            null
+        }
+
+        if (window != null && decorView != null && controller != null) {
+            WindowCompat.setDecorFitsSystemWindows(window, !fullscreen)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (fullscreen) {
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                decorView.systemUiVisibility =
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
+        }
+
+        onDispose {
+            if (window != null && decorView != null && controller != null) {
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
         }
     }
 
@@ -290,9 +352,18 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Gesture state
-    var seekDelta by remember { mutableLongStateOf(0L) }
-    var isSeeking by remember { mutableStateOf(false) }
+    // Seek preview state
+    var gestureSeekPreviewMs by remember { mutableLongStateOf(0L) }
+    var gestureSeekOriginalMs by remember { mutableLongStateOf(0L) }
+    var sliderSeekPreviewMs by remember { mutableLongStateOf(0L) }
+    var isGestureSeeking by remember { mutableStateOf(false) }
+    var isGestureSeekCancelled by remember { mutableStateOf(false) }
+    var isSliderSeeking by remember { mutableStateOf(false) }
+    var gestureOverlayMode by remember { mutableStateOf<GestureOverlayMode?>(null) }
+    var gestureBrightnessFraction by remember { mutableFloatStateOf(0f) }
+    var gestureVolumeFraction by remember { mutableFloatStateOf(0f) }
+    var isSpeedBoosting by remember { mutableStateOf(false) }
+    val centerSeekPreviewMs = if (isGestureSeeking) gestureSeekPreviewMs else sliderSeekPreviewMs
 
     // Dialog states
     var showSendDanmaku by remember { mutableStateOf(false) }
@@ -318,7 +389,11 @@ fun VideoPlayerScreen(
 
     // Apply playback speed
     LaunchedEffect(danmakuSettings.playbackSpeed) {
-        exoPlayer.setPlaybackSpeed(danmakuSettings.playbackSpeed)
+        exoPlayer.setPlaybackSpeed(if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed)
+    }
+
+    LaunchedEffect(isSpeedBoosting, danmakuSettings.playbackSpeed) {
+        exoPlayer.setPlaybackSpeed(if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed)
     }
 
     // Send danmaku sheet
@@ -341,6 +416,31 @@ fun VideoPlayerScreen(
         )
     }
 
+    fun performSeek(targetPositionMs: Long) {
+        val safeDuration = duration.coerceAtLeast(0L)
+        val target = targetPositionMs.coerceIn(0L, safeDuration)
+        exoPlayer.seekTo(target)
+        if (danmakuPrepared) {
+            try {
+                danmakuView.seekTo(target)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun applyScreenBrightness(brightnessFraction: Float) {
+        val window = activity?.window ?: return
+        val layoutParams = window.attributes
+        layoutParams.screenBrightness = brightnessFraction.coerceIn(0.01f, 1f)
+        window.attributes = layoutParams
+    }
+
+    fun applyStreamVolume(volumeFraction: Float) {
+        val targetVolume = (volumeFraction.coerceIn(0f, 1f) * audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+            .roundToInt()
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+    }
+
     if (isLandscape || uiState.isFullscreen) {
         // Fullscreen player
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -348,16 +448,79 @@ fun VideoPlayerScreen(
                 exoPlayer = exoPlayer,
                 danmakuView = danmakuView,
                 isDanmakuVisible = uiState.isDanmakuVisible,
+                videoSize = videoSize,
                 modifier = Modifier.fillMaxSize()
             )
 
             // Gesture layer
             GestureLayer(
-                context = context,
-                exoPlayer = exoPlayer,
+                currentPosition = currentPosition,
+                duration = duration,
+                activity = activity,
+                audioManager = audioManager,
+                playbackSpeed = if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed,
                 onToggleControls = { controlsVisible = !controlsVisible },
                 onTogglePlayPause = {
                     if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                },
+                onSeekPreviewStart = { startPosition ->
+                    controlsVisible = true
+                    isGestureSeeking = true
+                    isGestureSeekCancelled = false
+                    gestureOverlayMode = GestureOverlayMode.Seek
+                    gestureSeekOriginalMs = startPosition
+                    gestureSeekPreviewMs = startPosition
+                },
+                onSeekPreviewChange = { previewPosition, cancelled ->
+                    gestureOverlayMode = GestureOverlayMode.Seek
+                    gestureSeekPreviewMs = previewPosition
+                    isGestureSeekCancelled = cancelled
+                },
+                onSeekPreviewFinish = { previewPosition, cancelled ->
+                    isGestureSeeking = false
+                    isGestureSeekCancelled = false
+                    gestureSeekPreviewMs = previewPosition
+                    gestureOverlayMode = null
+                    if (!cancelled) {
+                        performSeek(previewPosition)
+                    }
+                },
+                onBrightnessChangeStart = { fraction ->
+                    controlsVisible = true
+                    gestureOverlayMode = GestureOverlayMode.Brightness
+                    gestureBrightnessFraction = fraction
+                    applyScreenBrightness(fraction)
+                },
+                onBrightnessChange = { fraction ->
+                    gestureOverlayMode = GestureOverlayMode.Brightness
+                    gestureBrightnessFraction = fraction
+                    applyScreenBrightness(fraction)
+                },
+                onBrightnessChangeFinish = {
+                    gestureOverlayMode = null
+                },
+                onVolumeChangeStart = { fraction ->
+                    controlsVisible = true
+                    gestureOverlayMode = GestureOverlayMode.Volume
+                    gestureVolumeFraction = fraction
+                    applyStreamVolume(fraction)
+                },
+                onVolumeChange = { fraction ->
+                    gestureOverlayMode = GestureOverlayMode.Volume
+                    gestureVolumeFraction = fraction
+                    applyStreamVolume(fraction)
+                },
+                onVolumeChangeFinish = {
+                    gestureOverlayMode = null
+                },
+                onSpeedBoostStart = {
+                    controlsVisible = true
+                    gestureOverlayMode = GestureOverlayMode.Speed
+                    isSpeedBoosting = true
+                },
+                onSpeedBoostEnd = {
+                    gestureOverlayMode = null
+                    isSpeedBoosting = false
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -380,9 +543,16 @@ fun VideoPlayerScreen(
                         }
                     },
                     onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                    onSeek = { pos ->
-                        exoPlayer.seekTo(pos)
-                        if (danmakuPrepared) try { danmakuView.seekTo(pos) } catch (_: Exception) {}
+                    centerSeekPreviewMs = centerSeekPreviewMs,
+                    onSeekPreviewChange = { previewPosition ->
+                        controlsVisible = true
+                        isSliderSeeking = true
+                        sliderSeekPreviewMs = previewPosition
+                    },
+                    onSeekPreviewEnd = { previewPosition ->
+                        isSliderSeeking = false
+                        sliderSeekPreviewMs = 0L
+                        performSeek(previewPosition)
                     },
                     onToggleDanmaku = { viewModel.toggleDanmaku() },
                     onToggleFullscreen = {
@@ -393,6 +563,24 @@ fun VideoPlayerScreen(
                     onSendDanmaku = { showSendDanmaku = true },
                     onDanmakuSettings = { showDanmakuSettings = !showDanmakuSettings },
                     modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            if (isGestureSeeking || isSliderSeeking || gestureOverlayMode == GestureOverlayMode.Brightness || gestureOverlayMode == GestureOverlayMode.Volume || gestureOverlayMode == GestureOverlayMode.Speed) {
+                CenterSeekPreview(
+                    mode = gestureOverlayMode ?: GestureOverlayMode.Seek,
+                    previewPosition = centerSeekPreviewMs,
+                    duration = duration,
+                    deltaMs = if (isGestureSeeking) {
+                        gestureSeekPreviewMs - gestureSeekOriginalMs
+                    } else {
+                        centerSeekPreviewMs - currentPosition
+                    },
+                    cancelled = isGestureSeeking && isGestureSeekCancelled,
+                    brightnessFraction = gestureBrightnessFraction,
+                    volumeFraction = gestureVolumeFraction,
+                    speedBoostActive = isSpeedBoosting,
+                    modifier = Modifier.align(Alignment.Center)
                 )
             }
 
@@ -440,15 +628,78 @@ fun VideoPlayerScreen(
                     exoPlayer = exoPlayer,
                     danmakuView = danmakuView,
                     isDanmakuVisible = uiState.isDanmakuVisible,
+                    videoSize = videoSize,
                     modifier = Modifier.fillMaxSize()
                 )
 
                 GestureLayer(
-                    context = context,
-                    exoPlayer = exoPlayer,
+                    currentPosition = currentPosition,
+                    duration = duration,
+                    activity = activity,
+                    audioManager = audioManager,
+                    playbackSpeed = if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed,
                     onToggleControls = { controlsVisible = !controlsVisible },
                     onTogglePlayPause = {
                         if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                    },
+                    onSeekPreviewStart = { startPosition ->
+                        controlsVisible = true
+                        isGestureSeeking = true
+                        isGestureSeekCancelled = false
+                        gestureOverlayMode = GestureOverlayMode.Seek
+                        gestureSeekOriginalMs = startPosition
+                        gestureSeekPreviewMs = startPosition
+                    },
+                    onSeekPreviewChange = { previewPosition, cancelled ->
+                        gestureOverlayMode = GestureOverlayMode.Seek
+                        gestureSeekPreviewMs = previewPosition
+                        isGestureSeekCancelled = cancelled
+                    },
+                    onSeekPreviewFinish = { previewPosition, cancelled ->
+                        isGestureSeeking = false
+                        isGestureSeekCancelled = false
+                        gestureSeekPreviewMs = previewPosition
+                        gestureOverlayMode = null
+                        if (!cancelled) {
+                            performSeek(previewPosition)
+                        }
+                    },
+                    onBrightnessChangeStart = { fraction ->
+                        controlsVisible = true
+                        gestureOverlayMode = GestureOverlayMode.Brightness
+                        gestureBrightnessFraction = fraction
+                        applyScreenBrightness(fraction)
+                    },
+                    onBrightnessChange = { fraction ->
+                        gestureOverlayMode = GestureOverlayMode.Brightness
+                        gestureBrightnessFraction = fraction
+                        applyScreenBrightness(fraction)
+                    },
+                    onBrightnessChangeFinish = {
+                        gestureOverlayMode = null
+                    },
+                    onVolumeChangeStart = { fraction ->
+                        controlsVisible = true
+                        gestureOverlayMode = GestureOverlayMode.Volume
+                        gestureVolumeFraction = fraction
+                        applyStreamVolume(fraction)
+                    },
+                    onVolumeChange = { fraction ->
+                        gestureOverlayMode = GestureOverlayMode.Volume
+                        gestureVolumeFraction = fraction
+                        applyStreamVolume(fraction)
+                    },
+                    onVolumeChangeFinish = {
+                        gestureOverlayMode = null
+                    },
+                    onSpeedBoostStart = {
+                        controlsVisible = true
+                        gestureOverlayMode = GestureOverlayMode.Speed
+                        isSpeedBoosting = true
+                    },
+                    onSpeedBoostEnd = {
+                        gestureOverlayMode = null
+                        isSpeedBoosting = false
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -463,9 +714,16 @@ fun VideoPlayerScreen(
                         isFullscreen = false,
                         onBack = onBack,
                         onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                        onSeek = { pos ->
-                            exoPlayer.seekTo(pos)
-                            if (danmakuPrepared) try { danmakuView.seekTo(pos) } catch (_: Exception) {}
+                        centerSeekPreviewMs = centerSeekPreviewMs,
+                        onSeekPreviewChange = { previewPosition ->
+                            controlsVisible = true
+                            isSliderSeeking = true
+                            sliderSeekPreviewMs = previewPosition
+                        },
+                        onSeekPreviewEnd = { previewPosition ->
+                            isSliderSeeking = false
+                            sliderSeekPreviewMs = 0L
+                            performSeek(previewPosition)
                         },
                         onToggleDanmaku = { viewModel.toggleDanmaku() },
                         onToggleFullscreen = {
@@ -476,6 +734,24 @@ fun VideoPlayerScreen(
                         onSendDanmaku = { showSendDanmaku = true },
                         onDanmakuSettings = { showDanmakuSettings = !showDanmakuSettings },
                         modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                if (isGestureSeeking || isSliderSeeking || gestureOverlayMode == GestureOverlayMode.Brightness || gestureOverlayMode == GestureOverlayMode.Volume || gestureOverlayMode == GestureOverlayMode.Speed) {
+                    CenterSeekPreview(
+                        mode = gestureOverlayMode ?: GestureOverlayMode.Seek,
+                        previewPosition = centerSeekPreviewMs,
+                        duration = duration,
+                        deltaMs = if (isGestureSeeking) {
+                            gestureSeekPreviewMs - gestureSeekOriginalMs
+                        } else {
+                            centerSeekPreviewMs - currentPosition
+                        },
+                        cancelled = isGestureSeeking && isGestureSeekCancelled,
+                        brightnessFraction = gestureBrightnessFraction,
+                        volumeFraction = gestureVolumeFraction,
+                        speedBoostActive = isSpeedBoosting,
+                        modifier = Modifier.align(Alignment.Center)
                     )
                 }
 
@@ -522,17 +798,26 @@ private fun PlayerSurface(
     exoPlayer: ExoPlayer,
     danmakuView: DanmakuView,
     isDanmakuVisible: Boolean,
+    videoSize: VideoSize,
     modifier: Modifier = Modifier
 ) {
+    var playerSurfaceSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val surfaceRefreshKey = remember(videoSize, playerSurfaceSize) { videoSize to playerSurfaceSize }
+
     Box(modifier = modifier) {
-        // 用 TextureView 替代 PlayerView（SurfaceView 会覆盖弹幕层）
         AndroidView(
             factory = { ctx ->
                 android.view.TextureView(ctx).also { textureView ->
                     exoPlayer.setVideoTextureView(textureView)
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            update = { textureView ->
+                surfaceRefreshKey
+                applyVideoTransform(textureView, videoSize)
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { playerSurfaceSize = it }
         )
 
         // Danmaku overlay — 复用外部创建的 DanmakuView 实例
@@ -552,22 +837,184 @@ private fun PlayerSurface(
 
 @Composable
 private fun GestureLayer(
-    context: Context,
-    exoPlayer: ExoPlayer,
+    currentPosition: Long,
+    duration: Long,
+    activity: Activity?,
+    audioManager: AudioManager,
+    playbackSpeed: Float,
     onToggleControls: () -> Unit,
     onTogglePlayPause: () -> Unit,
+    onSeekPreviewStart: (Long) -> Unit,
+    onSeekPreviewChange: (Long, Boolean) -> Unit,
+    onSeekPreviewFinish: (Long, Boolean) -> Unit,
+    onBrightnessChangeStart: (Float) -> Unit,
+    onBrightnessChange: (Float) -> Unit,
+    onBrightnessChangeFinish: () -> Unit,
+    onVolumeChangeStart: (Float) -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onVolumeChangeFinish: () -> Unit,
+    onSpeedBoostStart: () -> Unit,
+    onSpeedBoostEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
+    val density = LocalDensity.current
+    val horizontalSlopPx = with(density) { 12.dp.toPx() }
+    val verticalSlopPx = with(density) { 12.dp.toPx() }
+    val cancelThresholdPx = with(density) { 48.dp.toPx() }
+    val maxSeekDeltaMs = minOf(180_000L, (duration * 0.2f).toLong().coerceAtLeast(30_000L))
+    var layerWidthPx by remember { mutableIntStateOf(0) }
+    var layerHeightPx by remember { mutableIntStateOf(0) }
+    val latestCurrentPosition by rememberUpdatedState(currentPosition)
+    val latestDuration by rememberUpdatedState(duration)
+    val latestOnSeekPreviewStart by rememberUpdatedState(onSeekPreviewStart)
+    val latestOnSeekPreviewChange by rememberUpdatedState(onSeekPreviewChange)
+    val latestOnSeekPreviewFinish by rememberUpdatedState(onSeekPreviewFinish)
+    val latestOnBrightnessChangeStart by rememberUpdatedState(onBrightnessChangeStart)
+    val latestOnBrightnessChange by rememberUpdatedState(onBrightnessChange)
+    val latestOnBrightnessChangeFinish by rememberUpdatedState(onBrightnessChangeFinish)
+    val latestOnVolumeChangeStart by rememberUpdatedState(onVolumeChangeStart)
+    val latestOnVolumeChange by rememberUpdatedState(onVolumeChange)
+    val latestOnVolumeChangeFinish by rememberUpdatedState(onVolumeChangeFinish)
+    val latestOnSpeedBoostStart by rememberUpdatedState(onSpeedBoostStart)
+    val latestOnSpeedBoostEnd by rememberUpdatedState(onSpeedBoostEnd)
+    val maxVolume = remember(audioManager) { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
+    val latestPlaybackSpeed by rememberUpdatedState(playbackSpeed)
 
     Box(
         modifier = modifier
+            .onSizeChanged {
+                layerWidthPx = it.width
+                layerHeightPx = it.height
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { onToggleControls() },
                     onDoubleTap = { onTogglePlayPause() }
                 )
+            }
+            .pointerInput(layerWidthPx, layerHeightPx) {
+                coroutineScope {
+                    awaitEachGesture {
+                        val currentDuration = latestDuration
+                        if (layerWidthPx <= 0 || layerHeightPx <= 0) return@awaitEachGesture
+
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val startPosition = latestCurrentPosition
+                        val startX = down.position.x
+                        val startY = down.position.y
+                        val startBrightness = activity?.window?.attributes?.screenBrightness
+                            ?.takeIf { it >= 0f }
+                            ?: 0.5f
+                        val startVolume = if (maxVolume > 0) {
+                            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVolume.toFloat()
+                        } else {
+                            0f
+                        }
+                        val isBottomRegion = startY >= layerHeightPx * 0.78f
+
+                        var totalHorizontalDrag = 0f
+                        var totalVerticalDrag = 0f
+                        var seekActive = false
+                        var brightnessActive = false
+                        var volumeActive = false
+                        var speedBoostActive = false
+                        var speedBoostTriggered = false
+                        var cancelled = false
+                        var previewPosition = startPosition
+                        var finishDispatched = false
+
+                        val speedBoostJob = if (isBottomRegion) {
+                            launch {
+                                delay(2000)
+                                speedBoostTriggered = true
+                                speedBoostActive = true
+                                latestOnSpeedBoostStart()
+                            }
+                        } else {
+                            null
+                        }
+
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                if (!change.pressed) {
+                                    if (seekActive) {
+                                        finishDispatched = true
+                                        latestOnSeekPreviewFinish(previewPosition, cancelled)
+                                    }
+                                    break
+                                }
+
+                                val delta = change.position - change.previousPosition
+                                totalHorizontalDrag += delta.x
+                                totalVerticalDrag += delta.y
+                                val horizontalDistance = abs(totalHorizontalDrag)
+                                val verticalDistance = abs(totalVerticalDrag)
+
+                                if (!seekActive && !brightnessActive && !volumeActive) {
+                                    if (horizontalDistance >= horizontalSlopPx && horizontalDistance > verticalDistance) {
+                                        speedBoostJob?.cancel()
+                                        seekActive = true
+                                        previewPosition = startPosition
+                                        latestOnSeekPreviewStart(startPosition)
+                                    } else if (verticalDistance >= verticalSlopPx && verticalDistance > horizontalDistance) {
+                                        speedBoostJob?.cancel()
+                                        if (startX < layerWidthPx / 2f) {
+                                            brightnessActive = true
+                                            latestOnBrightnessChangeStart(startBrightness)
+                                        } else {
+                                            volumeActive = true
+                                            latestOnVolumeChangeStart(startVolume)
+                                        }
+                                    } else if (horizontalDistance >= horizontalSlopPx || verticalDistance >= verticalSlopPx) {
+                                        speedBoostJob?.cancel()
+                                    }
+                                }
+
+                                if (seekActive) {
+                                    change.consume()
+                                    val maxDelta = minOf(maxSeekDeltaMs, currentDuration)
+                                    val clampedFraction = (totalHorizontalDrag / layerWidthPx.toFloat()).coerceIn(-1f, 1f)
+                                    previewPosition = (startPosition + maxDelta * clampedFraction)
+                                        .toLong()
+                                        .coerceIn(0L, currentDuration)
+                                    cancelled = -totalVerticalDrag >= cancelThresholdPx
+                                    latestOnSeekPreviewChange(previewPosition, cancelled)
+                                } else if (brightnessActive) {
+                                    change.consume()
+                                    val fraction = (startBrightness - totalVerticalDrag / layerHeightPx.toFloat())
+                                        .coerceIn(0.01f, 1f)
+                                    latestOnBrightnessChange(fraction)
+                                } else if (volumeActive) {
+                                    change.consume()
+                                    val fraction = (startVolume - totalVerticalDrag / layerHeightPx.toFloat())
+                                        .coerceIn(0f, 1f)
+                                    latestOnVolumeChange(fraction)
+                                } else if (speedBoostActive) {
+                                    change.consume()
+                                } else if (speedBoostTriggered) {
+                                    change.consume()
+                                }
+                            }
+                        } finally {
+                            speedBoostJob?.cancel()
+                            if (seekActive && !finishDispatched) {
+                                latestOnSeekPreviewFinish(previewPosition, cancelled)
+                            }
+                            if (brightnessActive) {
+                                latestOnBrightnessChangeFinish()
+                            }
+                            if (volumeActive) {
+                                latestOnVolumeChangeFinish()
+                            }
+                            if (speedBoostTriggered || speedBoostActive || latestPlaybackSpeed == 2f) {
+                                latestOnSpeedBoostEnd()
+                            }
+                        }
+                    }
+                }
             }
     )
 }
@@ -582,7 +1029,9 @@ private fun PlayerControlsOverlay(
     isFullscreen: Boolean,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
-    onSeek: (Long) -> Unit,
+    centerSeekPreviewMs: Long,
+    onSeekPreviewChange: (Long) -> Unit,
+    onSeekPreviewEnd: (Long) -> Unit,
     onToggleDanmaku: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onScreenshot: () -> Unit,
@@ -591,8 +1040,11 @@ private fun PlayerControlsOverlay(
     modifier: Modifier = Modifier
 ) {
     val isPortraitControls = !isFullscreen
+    val legacyOnSeek: (Long) -> Unit = onSeekPreviewEnd
 
-    Box(modifier = modifier.background(Color.Black.copy(alpha = 0.24f))) {
+    Box(modifier = modifier) {
+        TopBottomGradientOverlay()
+
         // Top bar
         Row(
             modifier = Modifier
@@ -645,7 +1097,9 @@ private fun PlayerControlsOverlay(
             SlimPlayerSeekBar(
                 currentPosition = currentPosition,
                 duration = duration,
-                onSeek = onSeek,
+                centerSeekPreviewMs = centerSeekPreviewMs,
+                onSeekPreviewChange = onSeekPreviewChange,
+                onSeekPreviewEnd = onSeekPreviewEnd,
                 modifier = Modifier.weight(1f)
             )
 
@@ -693,7 +1147,7 @@ private fun PlayerControlsOverlay(
             Slider(
                 value = sliderPosition,
                 onValueChange = { sliderPosition = it },
-                onValueChangeFinished = { onSeek(sliderPosition.toLong()) },
+                onValueChangeFinished = { legacyOnSeek(sliderPosition.toLong()) },
                 valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),
                 colors = SliderDefaults.colors(
                     thumbColor = Color.White,
@@ -777,17 +1231,110 @@ private fun CompactControlButton(
 }
 
 @Composable
+private fun TopBottomGradientOverlay(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
+                    )
+                )
+        )
+    }
+}
+
+@Composable
+private fun CenterSeekPreview(
+    mode: GestureOverlayMode,
+    previewPosition: Long,
+    duration: Long,
+    deltaMs: Long,
+    cancelled: Boolean,
+    brightnessFraction: Float,
+    volumeFraction: Float,
+    speedBoostActive: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val deltaPrefix = when {
+        deltaMs > 0L -> "+"
+        deltaMs < 0L -> "-"
+        else -> ""
+    }
+    val deltaText = "$deltaPrefix${formatTime(abs(deltaMs))}"
+    val titleText = when (mode) {
+        GestureOverlayMode.Seek -> formatTime(previewPosition)
+        GestureOverlayMode.Brightness -> "${(brightnessFraction * 100).roundToInt()}%"
+        GestureOverlayMode.Volume -> "${(volumeFraction * 100).roundToInt()}%"
+        GestureOverlayMode.Speed -> "2.0x"
+    }
+    val detailText = when (mode) {
+        GestureOverlayMode.Seek -> "$deltaText / ${formatTime(duration)}"
+        GestureOverlayMode.Brightness -> "亮度"
+        GestureOverlayMode.Volume -> "音量"
+        GestureOverlayMode.Speed -> "长按加速播放中"
+    }
+    val hintText = when (mode) {
+        GestureOverlayMode.Seek -> if (cancelled) "上滑后松开取消调整" else "松开后跳转"
+        GestureOverlayMode.Brightness -> "左侧上下滑动调整"
+        GestureOverlayMode.Volume -> "右侧上下滑动调整"
+        GestureOverlayMode.Speed -> if (speedBoostActive) "松开后恢复原速" else "底部长按 2 秒触发"
+    }
+
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.64f), shape = MaterialTheme.shapes.medium)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = titleText,
+            color = Color.White,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = detailText,
+            color = Color.White.copy(alpha = 0.88f),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = hintText,
+            color = if (cancelled) Color(0xFFFFB74D) else Color.White.copy(alpha = 0.72f),
+            style = MaterialTheme.typography.labelMedium
+        )
+    }
+}
+
+@Composable
 private fun SlimPlayerSeekBar(
     currentPosition: Long,
     duration: Long,
-    onSeek: (Long) -> Unit,
+    centerSeekPreviewMs: Long,
+    onSeekPreviewChange: (Long) -> Unit,
+    onSeekPreviewEnd: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val maxValue = duration.toFloat().coerceAtLeast(1f)
     var sliderPosition by remember { mutableFloatStateOf(0f) }
     var isScrubbing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(currentPosition, maxValue, isScrubbing) {
+    LaunchedEffect(currentPosition, maxValue, isScrubbing, centerSeekPreviewMs) {
         if (!isScrubbing) {
             sliderPosition = currentPosition.toFloat().coerceIn(0f, maxValue)
         }
@@ -798,10 +1345,11 @@ private fun SlimPlayerSeekBar(
         onValueChange = {
             isScrubbing = true
             sliderPosition = it.coerceIn(0f, maxValue)
+            onSeekPreviewChange(sliderPosition.toLong())
         },
         onValueChangeFinished = {
             isScrubbing = false
-            onSeek(sliderPosition.toLong())
+            onSeekPreviewEnd(sliderPosition.toLong())
         },
         valueRange = 0f..maxValue,
         modifier = modifier,
@@ -1012,6 +1560,40 @@ private fun playbackState(currentPosition: Long, duration: Long, initialPlayTime
     if (currentPosition < 15_000L) return 0
     if (duration > 0 && duration - currentPosition < 15_000L) return 2
     return 1
+}
+
+private fun applyVideoTransform(
+    textureView: android.view.TextureView,
+    videoSize: VideoSize
+) {
+    val viewWidth = textureView.width.toFloat()
+    val viewHeight = textureView.height.toFloat()
+    val videoWidth = videoSize.width.toFloat()
+    val videoHeight = videoSize.height.toFloat()
+    val pixelRatio = videoSize.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+
+    if (viewWidth <= 0f || viewHeight <= 0f || videoWidth <= 0f || videoHeight <= 0f) {
+        textureView.setTransform(null)
+        return
+    }
+
+    val contentAspect = (videoWidth * pixelRatio) / videoHeight
+    val viewAspect = viewWidth / viewHeight
+    val scaleX: Float
+    val scaleY: Float
+
+    if (contentAspect > viewAspect) {
+        scaleX = 1f
+        scaleY = viewAspect / contentAspect
+    } else {
+        scaleX = contentAspect / viewAspect
+        scaleY = 1f
+    }
+
+    val matrix = Matrix().apply {
+        setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
+    }
+    textureView.setTransform(matrix)
 }
 
 private fun List<EpisodeUiItem>.nextEpisodeAfter(currentMediaId: String): EpisodeUiItem? {
