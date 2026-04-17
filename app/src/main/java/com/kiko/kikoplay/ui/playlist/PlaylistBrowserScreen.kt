@@ -1,5 +1,6 @@
 package com.kiko.kikoplay.ui.playlist
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -66,59 +68,122 @@ import com.kiko.kikoplay.ui.theme.MarkerPink
 import com.kiko.kikoplay.ui.theme.MarkerRed
 import com.kiko.kikoplay.ui.theme.MarkerYellow
 
+private const val LABEL_PLAYLIST = "\u64ad\u653e\u5217\u8868"
+private const val LABEL_BACK = "\u8fd4\u56de"
+private const val LABEL_REFRESH = "\u5237\u65b0"
+private const val LABEL_FILTER = "\u7b5b\u9009"
+private const val LABEL_RETRY = "\u91cd\u8bd5"
+private const val LABEL_EMPTY_DIR = "\u8be5\u76ee\u5f55\u4e0b\u6ca1\u6709\u5185\u5bb9"
+private const val LABEL_LOAD_FAILED = "\u52a0\u8f7d\u5931\u8d25"
+private const val LABEL_CANCEL = "\u53d6\u6d88"
+private const val LABEL_CACHE = "\u7f13\u5b58"
+private const val LABEL_MARK_WATCHED = "\u6807\u8bb0\u5df2\u770b"
+private const val LABEL_SELECT_ALL = "\u5168\u9009"
+private const val LABEL_SELECTED_PREFIX = "\u5df2\u9009 "
+private const val LABEL_SELECTED_SUFFIX = " \u9879"
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistBrowserScreen(
     onBack: () -> Unit,
-    onPlayMedia: (mediaId: String, title: String, danmuPool: String?, animeTitle: String?, parentPath: List<Int>, startPositionMs: Long, initialPlayTimeState: Int) -> Unit,
+    onPlayMedia: (
+        mediaId: String,
+        title: String,
+        danmuPool: String?,
+        animeTitle: String?,
+        parentPath: List<Int>,
+        startPositionMs: Long,
+        initialPlayTimeState: Int
+    ) -> Unit,
     viewModel: PlaylistBrowserViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilterMenu by remember { mutableStateOf(false) }
     val breadcrumbScrollState = rememberScrollState()
+    val listState = rememberLazyListState()
+
+    fun saveCurrentScrollPosition() {
+        viewModel.rememberCurrentScrollPosition(
+            index = listState.firstVisibleItemIndex,
+            offset = listState.firstVisibleItemScrollOffset
+        )
+    }
 
     LaunchedEffect(uiState.pathStack) {
         val target = if (uiState.pathStack.isEmpty()) 0 else breadcrumbScrollState.maxValue
         breadcrumbScrollState.animateScrollTo(target)
     }
 
+    LaunchedEffect(uiState.pathStack, uiState.currentItems.size, uiState.scrollPosition) {
+        if (uiState.currentItems.isEmpty()) return@LaunchedEffect
+        val targetIndex = uiState.scrollPosition.index.coerceIn(0, uiState.currentItems.lastIndex)
+        listState.scrollToItem(targetIndex, uiState.scrollPosition.offset)
+    }
+
+    BackHandler(enabled = uiState.pathStack.isNotEmpty()) {
+        saveCurrentScrollPosition()
+        viewModel.navigateUp()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    // Breadcrumb
                     Row(
                         modifier = Modifier.horizontalScroll(breadcrumbScrollState),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = { viewModel.navigateToPathIndex(-1) }) {
-                            Text("播放列表", maxLines = 1)
+                        TextButton(
+                            onClick = {
+                                saveCurrentScrollPosition()
+                                viewModel.navigateToPathIndex(-1)
+                            }
+                        ) {
+                            Text(LABEL_PLAYLIST, maxLines = 1)
                         }
                         uiState.pathStack.forEachIndexed { index, item ->
-                            Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
-                            TextButton(onClick = { viewModel.navigateToPathIndex(index) }) {
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            TextButton(
+                                onClick = {
+                                    saveCurrentScrollPosition()
+                                    viewModel.navigateToPathIndex(index)
+                                }
+                            ) {
                                 Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        if (uiState.pathStack.isNotEmpty()) viewModel.navigateUp()
-                        else onBack()
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    IconButton(
+                        onClick = {
+                            if (uiState.pathStack.isNotEmpty()) {
+                                saveCurrentScrollPosition()
+                                viewModel.navigateUp()
+                            } else {
+                                onBack()
+                            }
+                        }
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = LABEL_BACK)
                     }
                 },
                 actions = {
                     IconButton(onClick = { viewModel.loadPlaylist() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                        Icon(Icons.Default.Refresh, contentDescription = LABEL_REFRESH)
                     }
                     Box {
                         IconButton(onClick = { showFilterMenu = true }) {
-                            Icon(Icons.Default.FilterList, contentDescription = "筛选")
+                            Icon(Icons.Default.FilterList, contentDescription = LABEL_FILTER)
                         }
-                        DropdownMenu(expanded = showFilterMenu, onDismissRequest = { showFilterMenu = false }) {
+                        DropdownMenu(
+                            expanded = showFilterMenu,
+                            onDismissRequest = { showFilterMenu = false }
+                        ) {
                             PlayStateFilter.entries.forEach { filter ->
                                 DropdownMenuItem(
                                     text = {
@@ -126,7 +191,12 @@ fun PlaylistBrowserScreen(
                                             Text(filter.label)
                                             if (uiState.filter == filter) {
                                                 Spacer(Modifier.width(8.dp))
-                                                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
                                             }
                                         }
                                     },
@@ -153,30 +223,38 @@ fun PlaylistBrowserScreen(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
             when {
                 uiState.isLoading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
+
                 uiState.error != null -> {
                     EmptyState(
                         icon = Icons.Default.Refresh,
-                        message = uiState.error ?: "加载失败",
-                        actionLabel = "重试",
+                        message = uiState.error ?: LABEL_LOAD_FAILED,
+                        actionLabel = LABEL_RETRY,
                         onAction = { viewModel.loadPlaylist() },
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
+
                 uiState.currentItems.isEmpty() -> {
                     EmptyState(
                         icon = Icons.Default.Folder,
-                        message = "该目录下没有内容",
+                        message = LABEL_EMPTY_DIR,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
+
                 else -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
+                        state = listState,
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         itemsIndexed(uiState.currentItems) { index, node ->
@@ -188,8 +266,10 @@ fun PlaylistBrowserScreen(
                                     if (uiState.isSelectionMode) {
                                         viewModel.toggleSelection(index)
                                     } else if (node.isFolder) {
+                                        saveCurrentScrollPosition()
                                         viewModel.navigateToFolder(index, node)
                                     } else {
+                                        saveCurrentScrollPosition()
                                         onPlayMedia(
                                             node.mediaId ?: return@PlaylistItemCard,
                                             node.text,
@@ -237,8 +317,11 @@ private fun PlaylistItemCard(
             .padding(horizontal = 12.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
         )
     ) {
         Row(
@@ -250,18 +333,19 @@ private fun PlaylistItemCard(
                 Spacer(Modifier.width(4.dp))
             }
 
-            // Icon
             Icon(
                 imageVector = if (node.isFolder) Icons.Default.Folder else Icons.Default.VideoFile,
                 contentDescription = null,
-                tint = if (node.isFolder) MaterialTheme.colorScheme.primary
-                else playStateColor(node.playTimeState),
+                tint = if (node.isFolder) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    playStateColor(node.playTimeState)
+                },
                 modifier = Modifier.size(28.dp)
             )
 
             Spacer(Modifier.width(12.dp))
 
-            // Content
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = node.text,
@@ -288,16 +372,20 @@ private fun PlaylistItemCard(
                 }
             }
 
-            // Trailing
             if (node.isFolder) {
                 val childCount = node.nodes?.size ?: 0
                 Text(
-                    "$childCount",
+                    text = "$childCount",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.width(4.dp))
-                Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             } else {
                 PlayStateIcon(node.playTimeState)
             }
@@ -324,25 +412,27 @@ private fun SelectionBar(
     onMarkWatched: () -> Unit = {}
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClearSelection) {
-                Icon(Icons.Default.Close, contentDescription = "取消")
+                Icon(Icons.Default.Close, contentDescription = LABEL_CANCEL)
             }
-            Text("已选 $selectedCount 项", style = MaterialTheme.typography.bodyMedium)
+            Text("$LABEL_SELECTED_PREFIX$selectedCount$LABEL_SELECTED_SUFFIX", style = MaterialTheme.typography.bodyMedium)
         }
         Row {
             IconButton(onClick = onCache, enabled = selectedCount > 0) {
-                Icon(Icons.Default.Download, contentDescription = "缓存")
+                Icon(Icons.Default.Download, contentDescription = LABEL_CACHE)
             }
             IconButton(onClick = onMarkWatched, enabled = selectedCount > 0) {
-                Icon(Icons.Default.CheckCircle, contentDescription = "标记已看")
+                Icon(Icons.Default.CheckCircle, contentDescription = LABEL_MARK_WATCHED)
             }
             IconButton(onClick = onSelectAll) {
-                Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                Icon(Icons.Default.SelectAll, contentDescription = LABEL_SELECT_ALL)
             }
         }
     }
@@ -372,8 +462,7 @@ private fun formatDuration(seconds: Long): String {
     val h = seconds / 3600
     val m = (seconds % 3600) / 60
     val s = seconds % 60
-    return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
-    else String.format("%d:%02d", m, s)
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s)
 }
 
 private fun normalizeResumePositionMs(

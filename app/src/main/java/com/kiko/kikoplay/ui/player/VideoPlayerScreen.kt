@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -1375,7 +1376,16 @@ private fun PlayerContentInfo(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    val episodeListState = rememberLazyListState()
     val tabs = listOf("剧集", "弹幕")
+
+    LaunchedEffect(selectedTab, currentMediaId, episodes) {
+        if (selectedTab != 0) return@LaunchedEffect
+        val currentIndex = episodes.indexOfFirst { it.mediaId == currentMediaId }
+        if (currentIndex >= 0) {
+            episodeListState.scrollToItem(currentIndex)
+        }
+    }
 
     Column(modifier = modifier) {
         // Title area
@@ -1414,6 +1424,7 @@ private fun PlayerContentInfo(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
+                        state = episodeListState,
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         itemsIndexed(episodes, key = { _, episode -> episode.mediaId }) { _, episode ->

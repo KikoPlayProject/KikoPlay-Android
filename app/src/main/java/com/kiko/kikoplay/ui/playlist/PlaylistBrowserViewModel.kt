@@ -17,19 +17,25 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 enum class PlayStateFilter(val label: String) {
-    ALL("全部"),
-    UNWATCHED("未播放"),
-    WATCHING("未看完"),
-    WATCHED("已看完")
+    ALL("\u5168\u90e8"),
+    UNWATCHED("\u672a\u64ad\u653e"),
+    WATCHING("\u672a\u770b\u5b8c"),
+    WATCHED("\u5df2\u770b\u5b8c")
 }
 
 data class BreadcrumbItem(val name: String, val index: Int)
+
+data class ListScrollPosition(
+    val index: Int = 0,
+    val offset: Int = 0
+)
 
 data class PlaylistUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val currentItems: List<PlaylistNode> = emptyList(),
     val pathStack: List<BreadcrumbItem> = emptyList(),
+    val scrollPosition: ListScrollPosition = ListScrollPosition(),
     val filter: PlayStateFilter = PlayStateFilter.ALL,
     val isSelectionMode: Boolean = false,
     val selectedIndices: Set<Int> = emptySet()
@@ -46,6 +52,8 @@ class PlaylistBrowserViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(PlaylistUiState())
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
 
+    private val scrollPositions = mutableMapOf<List<Int>, ListScrollPosition>()
+
     init {
         observePlaylistProgressUpdates()
         loadPlaylist()
@@ -60,13 +68,20 @@ class PlaylistBrowserViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         currentItems = applyFilter(nodes, it.filter),
-                        pathStack = emptyList()
+                        pathStack = emptyList(),
+                        scrollPosition = scrollPositionFor(emptyList())
                     )
                 }
             }.onFailure { e ->
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "加载失败") }
+                _uiState.update {
+                    it.copy(isLoading = false, error = e.message ?: "\u52a0\u8f7d\u5931\u8d25")
+                }
             }
         }
+    }
+
+    fun rememberCurrentScrollPosition(index: Int, offset: Int) {
+        scrollPositions[currentPathIndices()] = ListScrollPosition(index = index, offset = offset)
     }
 
     fun navigateToFolder(index: Int, node: PlaylistNode) {
@@ -76,6 +91,7 @@ class PlaylistBrowserViewModel @Inject constructor(
             state.copy(
                 currentItems = applyFilter(children, state.filter),
                 pathStack = newPath,
+                scrollPosition = scrollPositionFor(newPath.map { it.index }),
                 isSelectionMode = false,
                 selectedIndices = emptySet()
             )
@@ -85,17 +101,20 @@ class PlaylistBrowserViewModel @Inject constructor(
     fun navigateUp() {
         val state = _uiState.value
         if (state.pathStack.isEmpty()) return
+
         val newPath = state.pathStack.dropLast(1)
+        val pathIndices = newPath.map { it.index }
         val items = if (newPath.isEmpty()) {
             playlistRepository.getCachedPlaylist() ?: emptyList()
         } else {
-            val indices = newPath.map { it.index }
-            playlistRepository.getNodeAtPath(indices) ?: emptyList()
+            playlistRepository.getNodeAtPath(pathIndices) ?: emptyList()
         }
+
         _uiState.update {
             it.copy(
                 currentItems = applyFilter(items, it.filter),
                 pathStack = newPath,
+                scrollPosition = scrollPositionFor(pathIndices),
                 isSelectionMode = false,
                 selectedIndices = emptySet()
             )
@@ -105,25 +124,27 @@ class PlaylistBrowserViewModel @Inject constructor(
     fun navigateToPathIndex(index: Int) {
         val state = _uiState.value
         if (index < 0) {
-            // Navigate to root
             val items = playlistRepository.getCachedPlaylist() ?: emptyList()
             _uiState.update {
                 it.copy(
                     currentItems = applyFilter(items, it.filter),
                     pathStack = emptyList(),
+                    scrollPosition = scrollPositionFor(emptyList()),
                     isSelectionMode = false,
                     selectedIndices = emptySet()
                 )
             }
             return
         }
+
         val newPath = state.pathStack.take(index + 1)
-        val indices = newPath.map { it.index }
-        val items = playlistRepository.getNodeAtPath(indices) ?: emptyList()
+        val pathIndices = newPath.map { it.index }
+        val items = playlistRepository.getNodeAtPath(pathIndices) ?: emptyList()
         _uiState.update {
             it.copy(
                 currentItems = applyFilter(items, it.filter),
                 pathStack = newPath,
+                scrollPosition = scrollPositionFor(pathIndices),
                 isSelectionMode = false,
                 selectedIndices = emptySet()
             )
@@ -135,11 +156,14 @@ class PlaylistBrowserViewModel @Inject constructor(
         val rawItems = if (state.pathStack.isEmpty()) {
             playlistRepository.getCachedPlaylist() ?: emptyList()
         } else {
-            val indices = state.pathStack.map { it.index }
-            playlistRepository.getNodeAtPath(indices) ?: emptyList()
+            playlistRepository.getNodeAtPath(currentPathIndices(state.pathStack)) ?: emptyList()
         }
         _uiState.update {
-            it.copy(filter = filter, currentItems = applyFilter(rawItems, filter))
+            it.copy(
+                filter = filter,
+                currentItems = applyFilter(rawItems, filter),
+                scrollPosition = scrollPositionFor(currentPathIndices(it.pathStack))
+            )
         }
     }
 
@@ -150,7 +174,11 @@ class PlaylistBrowserViewModel @Inject constructor(
     fun toggleSelection(index: Int) {
         _uiState.update { state ->
             val newSet = state.selectedIndices.toMutableSet()
-            if (newSet.contains(index)) newSet.remove(index) else newSet.add(index)
+            if (newSet.contains(index)) {
+                newSet.remove(index)
+            } else {
+                newSet.add(index)
+            }
             state.copy(selectedIndices = newSet)
         }
     }
@@ -195,7 +223,8 @@ class PlaylistBrowserViewModel @Inject constructor(
                         api.updatePlayTime(
                             UpdateTimeRequest(mediaId = node.mediaId, playTime = 0.0, playTimeState = 2)
                         )
-                    } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                    }
                 }
             }
             clearSelection()
@@ -216,27 +245,41 @@ class PlaylistBrowserViewModel @Inject constructor(
         val rawItems = if (state.pathStack.isEmpty()) {
             playlistRepository.getCachedPlaylist() ?: return
         } else {
-            val indices = state.pathStack.map { item -> item.index }
-            playlistRepository.getNodeAtPath(indices) ?: return
+            playlistRepository.getNodeAtPath(currentPathIndices(state.pathStack)) ?: return
         }
+
         _uiState.update {
             val refreshedItems = applyFilter(rawItems, it.filter)
             it.copy(
                 currentItems = refreshedItems,
+                scrollPosition = scrollPositionFor(currentPathIndices(it.pathStack)),
                 selectedIndices = it.selectedIndices.filter { index -> index in refreshedItems.indices }.toSet()
             )
         }
     }
 
+    private fun currentPathIndices(
+        pathStack: List<BreadcrumbItem> = _uiState.value.pathStack
+    ): List<Int> {
+        return pathStack.map { it.index }
+    }
+
+    private fun scrollPositionFor(path: List<Int>): ListScrollPosition {
+        return scrollPositions[path] ?: ListScrollPosition()
+    }
+
     private fun applyFilter(items: List<PlaylistNode>, filter: PlayStateFilter): List<PlaylistNode> {
         if (filter == PlayStateFilter.ALL) return items
         return items.filter { node ->
-            if (node.isFolder) true
-            else when (filter) {
-                PlayStateFilter.UNWATCHED -> node.playTimeState == 0
-                PlayStateFilter.WATCHING -> node.playTimeState == 1
-                PlayStateFilter.WATCHED -> node.playTimeState == 2
-                PlayStateFilter.ALL -> true
+            if (node.isFolder) {
+                true
+            } else {
+                when (filter) {
+                    PlayStateFilter.UNWATCHED -> node.playTimeState == 0
+                    PlayStateFilter.WATCHING -> node.playTimeState == 1
+                    PlayStateFilter.WATCHED -> node.playTimeState == 2
+                    PlayStateFilter.ALL -> true
+                }
             }
         }
     }
