@@ -254,6 +254,23 @@ class VideoPlayerViewModel @Inject constructor(
         loadDanmaku()
     }
 
+    fun cacheEpisodes(episodes: List<EpisodeUiItem>) {
+        if (route.sourceType != 0) return
+
+        val serverAddress = connectionManager.connection.value?.let { "${it.host}:${it.port}" } ?: return
+        viewModelScope.launch {
+            episodes.forEach { episode ->
+                cacheRepository.enqueue(
+                    mediaId = episode.mediaId,
+                    title = episode.title,
+                    animeTitle = episode.animeTitle,
+                    danmuPool = episode.danmuPool,
+                    serverAddress = serverAddress
+                )
+            }
+        }
+    }
+
     fun toggleDanmaku() {
         _uiState.update { it.copy(isDanmakuVisible = !it.isDanmakuVisible) }
     }

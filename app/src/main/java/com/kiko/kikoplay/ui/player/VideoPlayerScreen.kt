@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -32,11 +33,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -785,6 +790,7 @@ fun VideoPlayerScreen(
                         episode.playTimeState ?: 0
                     )
                 },
+                onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
                 onRefreshDanmaku = { viewModel.refreshDanmaku() },
                 onUpdateDelay = { id, delay -> viewModel.updateSourceDelay(id, delay) },
                 modifier = Modifier.weight(1f)
@@ -1371,12 +1377,15 @@ private fun PlayerContentInfo(
     episodes: List<EpisodeUiItem>,
     danmakuSources: List<com.kiko.kikoplay.data.remote.model.DanmakuSource>,
     onPlayEpisode: (EpisodeUiItem) -> Unit,
+    onCacheEpisodes: (List<EpisodeUiItem>) -> Unit,
     onRefreshDanmaku: () -> Unit,
     onUpdateDelay: (Int, Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val episodeListState = rememberLazyListState()
+    var isEpisodeSelectionMode by remember { mutableStateOf(false) }
+    var selectedEpisodeIds by remember { mutableStateOf(setOf<String>()) }
     val tabs = listOf("剧集", "弹幕")
 
     LaunchedEffect(selectedTab, currentMediaId, episodes) {
@@ -1384,6 +1393,15 @@ private fun PlayerContentInfo(
         val currentIndex = episodes.indexOfFirst { it.mediaId == currentMediaId }
         if (currentIndex >= 0) {
             episodeListState.scrollToItem(currentIndex)
+        }
+    }
+
+    LaunchedEffect(episodes) {
+        selectedEpisodeIds = selectedEpisodeIds.filterTo(linkedSetOf()) { selectedId ->
+            episodes.any { it.mediaId == selectedId }
+        }
+        if (selectedEpisodeIds.isEmpty()) {
+            isEpisodeSelectionMode = false
         }
     }
 
@@ -1422,21 +1440,59 @@ private fun PlayerContentInfo(
                         Text("当前目录没有可播放的视频条目", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        state = episodeListState,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        itemsIndexed(episodes, key = { _, episode -> episode.mediaId }) { _, episode ->
-                            val isCurrent = episode.mediaId == currentMediaId
-                            EpisodeListItem(
-                                episode = episode,
-                                isCurrent = isCurrent,
-                                currentPositionMs = if (isCurrent) currentPositionMs else null,
-                                onClick = { onPlayEpisode(episode) }
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        androidx.compose.animation.AnimatedVisibility(visible = isEpisodeSelectionMode) {
+                            EpisodeSelectionBar(
+                                selectedCount = selectedEpisodeIds.size,
+                                onSelectAll = { selectedEpisodeIds = episodes.map { it.mediaId }.toSet() },
+                                onClearSelection = {
+                                    isEpisodeSelectionMode = false
+                                    selectedEpisodeIds = emptySet()
+                                },
+                                onCache = {
+                                    onCacheEpisodes(episodes.filter { it.mediaId in selectedEpisodeIds })
+                                    isEpisodeSelectionMode = false
+                                    selectedEpisodeIds = emptySet()
+                                }
                             )
                         }
-                        item { Spacer(Modifier.height(8.dp)) }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            state = episodeListState,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            itemsIndexed(episodes, key = { _, episode -> episode.mediaId }) { _, episode ->
+                                val isCurrent = episode.mediaId == currentMediaId
+                                val isSelected = selectedEpisodeIds.contains(episode.mediaId)
+                                EpisodeListItem(
+                                    episode = episode,
+                                    isCurrent = isCurrent,
+                                    isSelected = isSelected,
+                                    isSelectionMode = isEpisodeSelectionMode,
+                                    currentPositionMs = if (isCurrent) currentPositionMs else null,
+                                    onClick = {
+                                        if (isEpisodeSelectionMode) {
+                                            val updatedSelection = selectedEpisodeIds.toMutableSet().apply {
+                                                if (!add(episode.mediaId)) remove(episode.mediaId)
+                                            }
+                                            selectedEpisodeIds = updatedSelection
+                                            if (updatedSelection.isEmpty()) {
+                                                isEpisodeSelectionMode = false
+                                            }
+                                        } else {
+                                            onPlayEpisode(episode)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (!isEpisodeSelectionMode) {
+                                            isEpisodeSelectionMode = true
+                                            selectedEpisodeIds = setOf(episode.mediaId)
+                                        }
+                                    }
+                                )
+                            }
+                            item { Spacer(Modifier.height(8.dp)) }
+                        }
                     }
                 }
             }
@@ -1479,8 +1535,11 @@ private fun PlayerContentInfo(
 private fun EpisodeListItem(
     episode: EpisodeUiItem,
     isCurrent: Boolean,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
     currentPositionMs: Long?,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val displayPlayTimeMs = currentPositionMs ?: episode.startPositionMs
 
@@ -1488,9 +1547,18 @@ private fun EpisodeListItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .clickable(enabled = !isCurrent, onClick = onClick),
+            .combinedClickable(
+                onClick = {
+                    if (!isCurrent || isSelectionMode) {
+                        onClick()
+                    }
+                },
+                onLongClick = onLongClick
+            ),
         colors = CardDefaults.cardColors(
-            containerColor = if (isCurrent) {
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else if (isCurrent) {
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
             } else {
                 MaterialTheme.colorScheme.surface
@@ -1501,6 +1569,11 @@ private fun EpisodeListItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (isSelectionMode) {
+                Checkbox(checked = isSelected, onCheckedChange = { onClick() })
+                Spacer(Modifier.width(4.dp))
+            }
+
             Icon(
                 imageVector = Icons.Default.VideoFile,
                 contentDescription = null,
@@ -1527,6 +1600,37 @@ private fun EpisodeListItem(
             }
 
             EpisodePlayStateIcon(episode.playTimeState)
+        }
+    }
+}
+
+@Composable
+private fun EpisodeSelectionBar(
+    selectedCount: Int,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onCache: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClearSelection) {
+                Icon(Icons.Default.Close, contentDescription = "取消")
+            }
+            Text("已选 $selectedCount 项", style = MaterialTheme.typography.bodyMedium)
+        }
+        Row {
+            IconButton(onClick = onCache, enabled = selectedCount > 0) {
+                Icon(Icons.Default.Download, contentDescription = "缓存")
+            }
+            IconButton(onClick = onSelectAll) {
+                Icon(Icons.Default.SelectAll, contentDescription = "全选")
+            }
         }
     }
 }

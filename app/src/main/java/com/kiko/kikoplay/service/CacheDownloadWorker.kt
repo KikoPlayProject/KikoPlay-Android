@@ -13,6 +13,7 @@ import com.kiko.kikoplay.data.remote.model.LocalDanmakuResponse
 import com.kiko.kikoplay.util.CacheFileHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -50,11 +51,12 @@ class CacheDownloadWorker @AssistedInject constructor(
 
         val outputFile = File(outputPath)
         outputFile.parentFile?.mkdirs()
+        var lastKnownBytes = if (outputFile.exists()) outputFile.length() else 0L
 
         try {
             cacheTaskDao.updateStatus(taskId, CacheTaskEntity.STATUS_DOWNLOADING)
 
-            val existingBytes = if (outputFile.exists()) outputFile.length() else 0L
+            val existingBytes = lastKnownBytes
             val probedTotalBytes = probeTotalBytes(mediaUrl)
 
             val requestBuilder = Request.Builder().url(mediaUrl)
@@ -100,6 +102,7 @@ class CacheDownloadWorker @AssistedInject constructor(
 
                         fos.write(buffer, 0, bytesRead)
                         downloadedBytes += bytesRead
+                        lastKnownBytes = downloadedBytes
 
                         // Update progress every 64KB
                         if (downloadedBytes % (64 * 1024) < 8192) {
@@ -114,6 +117,7 @@ class CacheDownloadWorker @AssistedInject constructor(
                     }
 
                     cacheTaskDao.updateProgress(taskId, downloadedBytes)
+                    lastKnownBytes = downloadedBytes
                 }
             }
 
@@ -137,7 +141,16 @@ class CacheDownloadWorker @AssistedInject constructor(
             )
             return Result.success()
 
+        } catch (_: CancellationException) {
+            cacheTaskDao.updateProgress(taskId, outputFile.length().coerceAtLeast(lastKnownBytes))
+            cacheTaskDao.updateStatus(taskId, CacheTaskEntity.STATUS_PAUSED)
+            return Result.success()
         } catch (e: Exception) {
+            if (isStopped) {
+                cacheTaskDao.updateProgress(taskId, outputFile.length().coerceAtLeast(lastKnownBytes))
+                cacheTaskDao.updateStatus(taskId, CacheTaskEntity.STATUS_PAUSED)
+                return Result.success()
+            }
             cacheTaskDao.updateStatus(taskId, CacheTaskEntity.STATUS_FAILED)
             return Result.failure()
         }
