@@ -96,7 +96,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import kotlinx.coroutines.coroutineScope
@@ -130,10 +133,11 @@ fun VideoPlayerScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val audioManager = remember { context.getSystemService(Activity.AUDIO_SERVICE) as AudioManager }
+    val constrainedPlaybackDevice = remember(context) { isConstrainedPlaybackDevice(context) }
 
     // ExoPlayer
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
+        createVideoPlayer(context, constrainedPlaybackDevice).apply {
             playWhenReady = true
         }
     }
@@ -153,20 +157,24 @@ fun VideoPlayerScreen(
     val latestVideoSize by rememberUpdatedState(videoSize)
     val latestOnPlayMedia by rememberUpdatedState(onPlayMedia)
     val finalHistorySaved = remember(uiState.mediaId) { AtomicBoolean(false) }
+    val latestContext by rememberUpdatedState(context)
 
     fun captureCurrentFrameThumbnail(): ByteArray? {
         val textureView = latestTextureView ?: return null
         val viewWidth = textureView.width
         val viewHeight = textureView.height
         if (viewWidth <= 0 || viewHeight <= 0) return null
+        if (!canSafelyCaptureThumbnail(latestContext)) return null
 
         val targetWidth = minOf(320, viewWidth)
         val targetHeight = ((viewHeight.toFloat() * targetWidth) / viewWidth)
             .roundToInt()
             .coerceAtLeast(1)
-        val bitmap = textureView.getBitmap(targetWidth, targetHeight) ?: return null
+        val bitmap = runCatching { textureView.getBitmap(targetWidth, targetHeight) }.getOrNull() ?: return null
         return try {
-            bitmap.toHistoryThumbnailBytes(videoSize = latestVideoSize)
+            runCatching {
+                bitmap.toHistoryThumbnailBytes(videoSize = latestVideoSize)
+            }.getOrNull()
         } finally {
             if (!bitmap.isRecycled) {
                 bitmap.recycle()
@@ -215,9 +223,11 @@ fun VideoPlayerScreen(
                 ).setMimeType(mimeType).setLanguage("und").build()
                 builder.setSubtitleConfigurations(listOf(subtitle))
             }
-            exoPlayer.setMediaItem(builder.build())
+            val mediaItem = builder.build()
             if (uiState.startPositionMs > 0L) {
-                exoPlayer.seekTo(uiState.startPositionMs)
+                exoPlayer.setMediaItem(mediaItem, uiState.startPositionMs)
+            } else {
+                exoPlayer.setMediaItem(mediaItem)
             }
             exoPlayer.prepare()
         }
@@ -330,7 +340,7 @@ fun VideoPlayerScreen(
     }
     val danmakuView = remember {
         DanmakuView(context).apply {
-            enableDanmakuDrawingCache(true)
+            enableDanmakuDrawingCache(!constrainedPlaybackDevice)
             show()
         }
     }
@@ -361,7 +371,7 @@ fun VideoPlayerScreen(
                 override fun danmakuShown(danmaku: BaseDanmaku?) {}
                 override fun drawingFinished() {}
             })
-            danmakuView.enableDanmakuDrawingCache(true)
+            danmakuView.enableDanmakuDrawingCache(!constrainedPlaybackDevice)
             danmakuView.show()
             danmakuView.prepare(parser, danmakuContext)
         }
@@ -1734,6 +1744,48 @@ private fun playbackState(currentPosition: Long, duration: Long, initialPlayTime
     return 1
 }
 
+@OptIn(UnstableApi::class)
+private fun createVideoPlayer(
+    context: android.content.Context,
+    constrainedPlaybackDevice: Boolean
+): ExoPlayer {
+    val renderersFactory = DefaultRenderersFactory(context)
+        .setEnableDecoderFallback(true)
+
+    val loadControlBuilder = DefaultLoadControl.Builder()
+    if (constrainedPlaybackDevice) {
+        loadControlBuilder
+            .setBufferDurationsMs(
+                5_000,
+                15_000,
+                750,
+                1_500
+            )
+            .setTargetBufferBytes(8 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+    }
+
+    return ExoPlayer.Builder(context, renderersFactory)
+        .setLoadControl(loadControlBuilder.build())
+        .build()
+        .apply {
+            if (constrainedPlaybackDevice) {
+                setSeekParameters(SeekParameters.CLOSEST_SYNC)
+            }
+        }
+}
+
+private fun isConstrainedPlaybackDevice(context: android.content.Context): Boolean {
+    val activityManager =
+        context.getSystemService(Activity.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            ?: return false
+    val memoryInfo = android.app.ActivityManager.MemoryInfo().also(activityManager::getMemoryInfo)
+    return activityManager.isLowRamDevice ||
+        activityManager.memoryClass <= 192 ||
+        activityManager.largeMemoryClass <= 256 ||
+        memoryInfo.lowMemory
+}
+
 private fun Bitmap.toHistoryThumbnailBytes(
     maxWidth: Int = 320,
     videoSize: VideoSize = VideoSize.UNKNOWN
@@ -1748,6 +1800,18 @@ private fun Bitmap.toHistoryThumbnailBytes(
             thumbnailBitmap.recycle()
         }
     }
+}
+
+private fun canSafelyCaptureThumbnail(context: android.content.Context): Boolean {
+    val activityManager = context.getSystemService(Activity.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        ?: return false
+    val memoryInfo = android.app.ActivityManager.MemoryInfo()
+    activityManager.getMemoryInfo(memoryInfo)
+    if (memoryInfo.lowMemory) return false
+
+    val runtime = Runtime.getRuntime()
+    val availableHeapBytes = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+    return availableHeapBytes >= 24L * 1024L * 1024L
 }
 
 private fun Bitmap.renderHistoryThumbnail(

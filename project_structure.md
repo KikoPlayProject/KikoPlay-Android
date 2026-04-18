@@ -10,7 +10,7 @@ KikoPlay Android 是 KikoPlay PC 的局域网配套播放器客户端。
 - 浏览 PC 播放列表并发起串流播放，支持目录面包屑、分级返回、目录滚动位置恢复、同目录剧集联动与本地进度同步
 - 本地视频扫描与播放
 - 弹幕加载、发送与基础设置
-- 观看历史记录与最近观看恢复播放
+- 观看历史记录、首页最近观看缩略图与恢复播放
 - 视频缓存与后台下载
 - 缓存媒体的本地离线播放与弹幕复用
 
@@ -201,6 +201,8 @@ com.kiko.kikoplay/
 │   └── repository/
 │       ├── CacheRepository.kt
 │       ├── ConnectionRepository.kt
+│       ├── HistoryPlaybackCoordinator.kt
+│       ├── HistoryThumbnailRepository.kt
 │       ├── LocalVideoRepository.kt
 │       ├── PlaylistRepository.kt
 │       ├── SettingsRepository.kt
@@ -273,14 +275,14 @@ com.kiko.kikoplay/
 
 - `data/local`: Room 数据库、实体和 DAO
 - `data/remote`: REST API、连接状态与网络 DTO
-- `data/repository`: 面向 ViewModel 的仓库层封装
+- `data/repository`: 面向 ViewModel 的仓库层封装，包含历史续播目标解析、历史缩略图生成与首页最近观看复用逻辑
 
 ### UI 层
 
-- `ui/home`: 首页与观看历史入口，包含最近观看去重、缓存标记与恢复播放
+- `ui/home`: 首页与观看历史入口，首页最近观看使用纵向缩略图列表展示，包含最近观看去重、缓存标记、进度条与恢复播放
 - `ui/connection`: 局域网连接管理
 - `ui/playlist`: PC 播放列表浏览，支持 breadcrumb 自动滚动、系统返回逐级回退、按目录恢复列表滚动位置、从播放页返回后保留进入前列表位置，以及本地播放进度联动
-- `ui/player`: 播放器、同目录剧集列表、进入播放页后剧集列表自动定位当前播放项、剧集长按多选缓存、续播进度同步、自动下一集、弹幕与截图片段交互，支持沉浸式全屏、顶部/底部渐变控制层、横向手势精细 seek、左侧亮度调节、右侧音量调节、底部长按临时倍速与中心提示，使用自定义滑杆组件并按原视频比例渲染画面
+- `ui/player`: 播放器、同目录剧集列表、进入播放页后剧集列表自动定位当前播放项、剧集长按多选缓存、续播进度同步、自动下一集、弹幕与截图片段交互，支持沉浸式全屏、顶部/底部渐变控制层、横向手势精细 seek、左侧亮度调节、右侧音量调节、底部长按临时倍速与中心提示，使用自定义滑杆组件并按原视频比例渲染画面，同时会在退出播放器或自动切到下一集前保存当前帧历史缩略图，并在低内存设备上启用更保守的缓冲、seek 与抓图兜底
 - `ui/local`: 本地视频列表
 - `ui/cache`: 缓存任务管理，展示下载进度与缓存大小
 - `ui/settings`: 应用设置
@@ -340,6 +342,10 @@ app/src/androidTest/
 | `connections` | 连接历史 |
 | `watch_history` | 观看历史 |
 | `cache_tasks` | 缓存任务 |
+
+补充说明：
+
+- `watch_history.thumbnailData` 继续复用于首页最近观看缩略图，不涉及 Room 表结构变更或数据库升级
 
 ## 已知待完善项
 
