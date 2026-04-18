@@ -1,11 +1,14 @@
 package com.kiko.kikoplay.ui.player
 
 import android.app.Activity
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.media.AudioManager
 import android.graphics.Matrix
 import android.content.pm.ActivityInfo
 import android.view.View
 import androidx.annotation.OptIn
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -99,6 +102,8 @@ import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import master.flame.danmaku.danmaku.model.BaseDanmaku
@@ -140,10 +145,60 @@ fun VideoPlayerScreen(
     var isBuffering by remember { mutableStateOf(true) }
     var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
     var autoAdvanceHandled by remember(uiState.mediaId) { mutableStateOf(false) }
+    var playerTextureView by remember { mutableStateOf<android.view.TextureView?>(null) }
     val latestUiState by rememberUpdatedState(uiState)
     val latestCurrentPosition by rememberUpdatedState(currentPosition)
     val latestDuration by rememberUpdatedState(duration)
+    val latestTextureView by rememberUpdatedState(playerTextureView)
+    val latestVideoSize by rememberUpdatedState(videoSize)
     val latestOnPlayMedia by rememberUpdatedState(onPlayMedia)
+    val finalHistorySaved = remember(uiState.mediaId) { AtomicBoolean(false) }
+
+    fun captureCurrentFrameThumbnail(): ByteArray? {
+        val textureView = latestTextureView ?: return null
+        val viewWidth = textureView.width
+        val viewHeight = textureView.height
+        if (viewWidth <= 0 || viewHeight <= 0) return null
+
+        val targetWidth = minOf(320, viewWidth)
+        val targetHeight = ((viewHeight.toFloat() * targetWidth) / viewWidth)
+            .roundToInt()
+            .coerceAtLeast(1)
+        val bitmap = textureView.getBitmap(targetWidth, targetHeight) ?: return null
+        return try {
+            bitmap.toHistoryThumbnailBytes(videoSize = latestVideoSize)
+        } finally {
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    fun syncTerminalPlayState(positionMs: Long, durationMs: Long) {
+        if (!finalHistorySaved.compareAndSet(false, true)) return
+
+        val finalState = playbackState(positionMs, durationMs, latestUiState.initialPlayTimeState)
+        viewModel.syncPlayTime(
+            positionMs = positionMs,
+            playTimeState = finalState,
+            durationMs = durationMs,
+            thumbnailData = captureCurrentFrameThumbnail()
+        )
+    }
+
+    fun navigateBackWithSnapshot() {
+        syncTerminalPlayState(currentPosition, duration)
+        onBack()
+    }
+
+    BackHandler {
+        if (uiState.isFullscreen || isLandscape) {
+            viewModel.setFullscreen(false)
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        } else {
+            navigateBackWithSnapshot()
+        }
+    }
 
     // Set media source with subtitle
     LaunchedEffect(uiState.mediaUrl, uiState.subtitleUrl, uiState.startPositionMs) {
@@ -186,8 +241,7 @@ fun VideoPlayerScreen(
 
                 autoAdvanceHandled = true
                 val finalPosition = latestDuration.takeIf { it > 0L } ?: latestCurrentPosition
-                val finalState = playbackState(finalPosition, latestDuration, latestUiState.initialPlayTimeState)
-                viewModel.syncPlayTime(finalPosition, finalState, latestDuration)
+                syncTerminalPlayState(finalPosition, latestDuration)
 
                 val nextEpisode = latestUiState.episodes.nextEpisodeAfter(latestUiState.mediaId) ?: return
                 latestOnPlayMedia(
@@ -224,8 +278,7 @@ fun VideoPlayerScreen(
     DisposableEffect(Unit) {
         onDispose {
             if (currentPosition > 0) {
-                val state = playbackState(currentPosition, duration, uiState.initialPlayTimeState)
-                viewModel.syncPlayTime(currentPosition, state, duration)
+                syncTerminalPlayState(currentPosition, duration)
             }
             exoPlayer.release()
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -455,6 +508,7 @@ fun VideoPlayerScreen(
                 danmakuView = danmakuView,
                 isDanmakuVisible = uiState.isDanmakuVisible,
                 videoSize = videoSize,
+                onTextureViewReady = { playerTextureView = it },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -545,7 +599,7 @@ fun VideoPlayerScreen(
                             viewModel.setFullscreen(false)
                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         } else {
-                            onBack()
+                            navigateBackWithSnapshot()
                         }
                     },
                     onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
@@ -635,6 +689,7 @@ fun VideoPlayerScreen(
                     danmakuView = danmakuView,
                     isDanmakuVisible = uiState.isDanmakuVisible,
                     videoSize = videoSize,
+                    onTextureViewReady = { playerTextureView = it },
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -718,7 +773,7 @@ fun VideoPlayerScreen(
                         duration = duration,
                         isDanmakuVisible = uiState.isDanmakuVisible,
                         isFullscreen = false,
-                        onBack = onBack,
+                        onBack = ::navigateBackWithSnapshot,
                         onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
                         centerSeekPreviewMs = centerSeekPreviewMs,
                         onSeekPreviewChange = { previewPosition ->
@@ -778,8 +833,7 @@ fun VideoPlayerScreen(
                 episodes = uiState.episodes,
                 danmakuSources = uiState.danmakuSources,
                 onPlayEpisode = { episode ->
-                    val state = playbackState(currentPosition, duration, uiState.initialPlayTimeState)
-                    viewModel.syncPlayTime(currentPosition, state, duration)
+                    syncTerminalPlayState(currentPosition, duration)
                     onPlayMedia(
                         episode.mediaId,
                         episode.title,
@@ -806,6 +860,7 @@ private fun PlayerSurface(
     danmakuView: DanmakuView,
     isDanmakuVisible: Boolean,
     videoSize: VideoSize,
+    onTextureViewReady: (android.view.TextureView) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var playerSurfaceSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
@@ -816,10 +871,12 @@ private fun PlayerSurface(
             factory = { ctx ->
                 android.view.TextureView(ctx).also { textureView ->
                     exoPlayer.setVideoTextureView(textureView)
+                    onTextureViewReady(textureView)
                 }
             },
             update = { textureView ->
                 surfaceRefreshKey
+                onTextureViewReady(textureView)
                 applyVideoTransform(textureView, videoSize)
             },
             modifier = Modifier
@@ -1675,6 +1732,65 @@ private fun playbackState(currentPosition: Long, duration: Long, initialPlayTime
     if (currentPosition < 15_000L) return 0
     if (duration > 0 && duration - currentPosition < 15_000L) return 2
     return 1
+}
+
+private fun Bitmap.toHistoryThumbnailBytes(
+    maxWidth: Int = 320,
+    videoSize: VideoSize = VideoSize.UNKNOWN
+): ByteArray {
+    val output = ByteArrayOutputStream()
+    val thumbnailBitmap = renderHistoryThumbnail(maxWidth, videoSize)
+    try {
+        thumbnailBitmap.compress(Bitmap.CompressFormat.JPEG, 80, output)
+        return output.toByteArray()
+    } finally {
+        if (thumbnailBitmap != this && !thumbnailBitmap.isRecycled) {
+            thumbnailBitmap.recycle()
+        }
+    }
+}
+
+private fun Bitmap.renderHistoryThumbnail(
+    maxWidth: Int,
+    videoSize: VideoSize
+): Bitmap {
+    if (width <= 0 || height <= 0 || maxWidth <= 0) return this
+
+    val targetWidth = maxWidth
+    val targetHeight = (targetWidth * 9f / 16f).roundToInt().coerceAtLeast(1)
+
+    val pixelRatio = videoSize.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+    val sourceAspect = when {
+        videoSize.width > 0 && videoSize.height > 0 ->
+            (videoSize.width.toFloat() * pixelRatio) / videoSize.height.toFloat()
+        else -> width.toFloat() / height.toFloat()
+    }
+    val targetAspect = targetWidth.toFloat() / targetHeight.toFloat()
+    val scaledWidth: Int
+    val scaledHeight: Int
+
+    if (sourceAspect > targetAspect) {
+        scaledWidth = targetWidth
+        scaledHeight = (targetWidth / sourceAspect).roundToInt().coerceAtLeast(1)
+    } else {
+        scaledHeight = targetHeight
+        scaledWidth = (targetHeight * sourceAspect).roundToInt().coerceAtLeast(1)
+    }
+
+    val scaledBitmap = Bitmap.createScaledBitmap(this, scaledWidth, scaledHeight, true)
+    val outputBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(outputBitmap)
+    canvas.drawColor(android.graphics.Color.BLACK)
+
+    val left = ((targetWidth - scaledWidth) / 2f)
+    val top = ((targetHeight - scaledHeight) / 2f)
+    canvas.drawBitmap(scaledBitmap, left, top, null)
+
+    if (scaledBitmap != this && !scaledBitmap.isRecycled) {
+        scaledBitmap.recycle()
+    }
+
+    return outputBitmap
 }
 
 private fun applyVideoTransform(

@@ -35,7 +35,7 @@ class HomeViewModel @Inject constructor(
     val connectionInfo: StateFlow<ConnectionInfo?> = connectionManager.connection
 
     val recentHistory: StateFlow<List<WatchHistoryEntity>> =
-        watchHistoryRepository.getRecent(10).stateIn(
+        watchHistoryRepository.getRecent(4).stateIn(
             viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
         )
 

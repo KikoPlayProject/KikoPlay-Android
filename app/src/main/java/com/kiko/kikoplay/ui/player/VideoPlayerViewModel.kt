@@ -284,6 +284,20 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     fun syncPlayTime(positionMs: Long, playTimeState: Int, durationMs: Long = 0) {
+        syncPlayTime(
+            positionMs = positionMs,
+            playTimeState = playTimeState,
+            durationMs = durationMs,
+            thumbnailData = null
+        )
+    }
+
+    fun syncPlayTime(
+        positionMs: Long,
+        playTimeState: Int,
+        durationMs: Long = 0,
+        thumbnailData: ByteArray? = null
+    ) {
         val safePositionMs = positionMs.coerceAtLeast(0L)
         val playTimeSeconds = safePositionMs / 1000.0
         if (route.sourceType == 0) {
@@ -337,6 +351,7 @@ class VideoPlayerViewModel @Inject constructor(
                     isCached = isCached,
                     remoteUri = remoteUri,
                     localPath = localPath,
+                    thumbnailData = thumbnailData,
                     danmuPool = route.danmuPool,
                     serverAddress = serverAddress
                 )

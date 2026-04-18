@@ -1,27 +1,29 @@
 package com.kiko.kikoplay.ui.home
 
-import androidx.compose.foundation.clickable
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
@@ -32,13 +34,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -47,6 +53,8 @@ import com.kiko.kikoplay.data.local.entity.WatchHistoryEntity
 import com.kiko.kikoplay.data.repository.HistoryPlaybackTarget
 import com.kiko.kikoplay.ui.common.EmptyState
 import kotlinx.coroutines.flow.collectLatest
+
+private const val HOME_RECENT_HISTORY_LIMIT = 4
 
 @Composable
 fun HomeScreen(
@@ -63,7 +71,6 @@ fun HomeScreen(
     val isResolvingHistory by viewModel.isResolvingHistory.collectAsStateWithLifecycle()
     val isConnected = connectionInfo != null
 
-    // Load recent dirs when connected
     LaunchedEffect(isConnected) {
         if (isConnected) viewModel.loadRecentDirs()
     }
@@ -106,7 +113,6 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        // PC Playlist Card
         Card(
             onClick = { if (isConnected) onNavigateToPlaylist() else onNavigateToConnection() },
             modifier = Modifier.fillMaxWidth(),
@@ -176,7 +182,6 @@ fun HomeScreen(
             }
         }
 
-        // Recent dirs shortcuts
         if (isConnected && recentDirs.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             Row(
@@ -216,7 +221,6 @@ fun HomeScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // Recent Watch section
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -236,11 +240,10 @@ fun HomeScreen(
                 message = "还没有观看记录"
             )
         } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(end = 8.dp)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(recentHistory, key = { it.id }) { item ->
+                recentHistory.take(HOME_RECENT_HISTORY_LIMIT).forEach { item ->
                     RecentWatchCard(
                         item = item,
                         onClick = {
@@ -259,74 +262,126 @@ private fun RecentWatchCard(
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .width(160.dp)
-            .clickable(onClick = onClick),
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // Source icon
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = when (item.sourceType) {
-                        0 -> Icons.Default.Computer
-                        else -> Icons.Default.PhoneAndroid
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = when (item.sourceType) {
-                        0 -> "PC"
-                        1 -> "本地"
-                        else -> "缓存"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (item.isCached && item.sourceType != 1) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "已缓存",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Title
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HistoryThumbnail(
+                item = item,
+                modifier = Modifier
+                    .width(118.dp)
+                    .aspectRatio(16f / 9f)
             )
+            Spacer(Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = when (item.sourceType) {
+                            SOURCE_TYPE_PC -> Icons.Default.Computer
+                            else -> Icons.Default.PhoneAndroid
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = when (item.sourceType) {
+                            SOURCE_TYPE_PC -> "PC"
+                            SOURCE_TYPE_LOCAL -> "本地"
+                            else -> "缓存"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (item.isCached && item.sourceType != SOURCE_TYPE_LOCAL) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "已缓存",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
 
-            if (item.animeTitle != null) {
+                Spacer(Modifier.height(5.dp))
+
                 Text(
-                    text = item.animeTitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    text = item.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
 
-            Spacer(Modifier.height(8.dp))
+                if (item.animeTitle != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = item.animeTitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-            // Progress
-            if (item.duration > 0) {
-                LinearProgressIndicator(
-                    progress = { (item.playTime.toFloat() / item.duration).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
-                )
+                if (item.duration > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { (item.playTime.toFloat() / item.duration).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                    )
+                }
             }
         }
     }
 }
+
+@Composable
+private fun HistoryThumbnail(
+    item: WatchHistoryEntity,
+    modifier: Modifier = Modifier
+) {
+    val imageBitmap = remember(item.thumbnailData) {
+        item.thumbnailData?.let { data ->
+            BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap()
+        }
+    }
+    val shape = RoundedCornerShape(12.dp)
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(androidx.compose.ui.graphics.Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        if (imageBitmap != null) {
+            Image(
+                bitmap = imageBitmap,
+                contentDescription = "${item.title} 缩略图",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.VideoFile,
+                contentDescription = null,
+                modifier = Modifier.size(30.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            )
+        }
+    }
+}
+
+private const val SOURCE_TYPE_PC = 0
+private const val SOURCE_TYPE_LOCAL = 1

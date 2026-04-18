@@ -31,6 +31,7 @@ class WatchHistoryRepository @Inject constructor(
         isCached: Boolean,
         remoteUri: String?,
         localPath: String?,
+        thumbnailData: ByteArray? = null,
         danmuPool: String?,
         serverAddress: String?
     ) {
@@ -49,6 +50,7 @@ class WatchHistoryRepository @Inject constructor(
             )
         }
         val thumbnailData = when {
+            thumbnailData != null -> thumbnailData
             existing?.thumbnailData != null && existing.localPath == localPath -> existing.thumbnailData
             else -> historyThumbnailRepository.createThumbnail(localPath) ?: existing?.thumbnailData
         }

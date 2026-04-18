@@ -25,8 +25,16 @@ class HistoryThumbnailRepository @Inject constructor() {
                 ?: retriever.frameAtTime
             retriever.release()
 
-            frame?.useScaledCopy(maxWidth = 320)?.toJpegBytes()
+            frame?.toThumbnailBytes(maxWidth = 320)
         }.getOrNull()
+    }
+
+    suspend fun createThumbnail(bitmap: Bitmap?): ByteArray? = withContext(Dispatchers.Default) {
+        bitmap?.toThumbnailBytes(maxWidth = 320)
+    }
+
+    private fun Bitmap.toThumbnailBytes(maxWidth: Int): ByteArray {
+        return useScaledCopy(maxWidth = maxWidth).toJpegBytes()
     }
 
     private fun Bitmap.useScaledCopy(maxWidth: Int): Bitmap {
