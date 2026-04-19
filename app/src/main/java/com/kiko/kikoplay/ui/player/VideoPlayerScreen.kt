@@ -340,7 +340,7 @@ fun VideoPlayerScreen(
     }
     val danmakuView = remember {
         DanmakuView(context).apply {
-            enableDanmakuDrawingCache(!constrainedPlaybackDevice)
+            enableDanmakuDrawingCache(true)
             show()
         }
     }
@@ -371,7 +371,7 @@ fun VideoPlayerScreen(
                 override fun danmakuShown(danmaku: BaseDanmaku?) {}
                 override fun drawingFinished() {}
             })
-            danmakuView.enableDanmakuDrawingCache(!constrainedPlaybackDevice)
+            danmakuView.enableDanmakuDrawingCache(true)
             danmakuView.show()
             danmakuView.prepare(parser, danmakuContext)
         }
@@ -391,25 +391,6 @@ fun VideoPlayerScreen(
         try {
             if (isPlaying) danmakuView.resume() else danmakuView.pause()
         } catch (_: Exception) {}
-    }
-
-    // 持续同步弹幕时间和 ExoPlayer 时间
-    LaunchedEffect(danmakuPrepared) {
-        if (!danmakuPrepared) return@LaunchedEffect
-        while (true) {
-            delay(500)
-            val dvTime = danmakuView.currentTime
-            val exoTime = exoPlayer.currentPosition
-            val diff = exoTime - dvTime
-            // 当弹幕时间与播放器时间偏差超过 1 秒时，强制同步
-            if (kotlin.math.abs(diff) > 1000) {
-                try {
-                    danmakuView.seekTo(exoTime)
-                } catch (e: Exception) {
-                    android.util.Log.w("DanmakuDebug", "seekTo failed", e)
-                }
-            }
-        }
     }
 
     // Controls visibility
