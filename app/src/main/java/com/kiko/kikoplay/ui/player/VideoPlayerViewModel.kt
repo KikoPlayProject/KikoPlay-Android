@@ -19,6 +19,8 @@ import com.kiko.kikoplay.data.repository.WatchHistoryRepository
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuItem
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
+import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
+import com.kiko.kikoplay.ui.player.danmaku.FullDanmakuComment
 import com.kiko.kikoplay.util.CacheFileHelper
 import com.kiko.kikoplay.util.MediaUrlBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -56,9 +58,11 @@ data class PlayerUiState(
     val initialPlayTimeState: Int = 0,
     val danmakuItems: List<DanmakuItem> = emptyList(),
     val danmakuSources: List<DanmakuSource> = emptyList(),
+    val danmakuSourceSummaries: List<DanmakuSourceSummary> = emptyList(),
     val launchScripts: List<String> = emptyList(),
     val episodes: List<EpisodeUiItem> = emptyList(),
     val isDanmakuLoading: Boolean = false,
+    val isDanmakuRefreshing: Boolean = false,
     val isDanmakuVisible: Boolean = true,
     val isFullscreen: Boolean = false,
     val controlsVisible: Boolean = true,
@@ -78,6 +82,7 @@ class VideoPlayerViewModel @Inject constructor(
 ) : ViewModel() {
     private val route = savedStateHandle.toRoute<VideoPlayerRoute>()
     val parentPath: List<Int> get() = uiState.value.parentPath
+    private var fullDanmakuComments: List<FullDanmakuComment> = emptyList()
 
     private val _uiState = MutableStateFlow(
         PlayerUiState(
@@ -176,10 +181,12 @@ class VideoPlayerViewModel @Inject constructor(
 
     private fun loadDanmaku() {
         loadCachedDanmaku()?.let { cached ->
+            fullDanmakuComments = cached.fullComments
             _uiState.update {
                 it.copy(
                     danmakuItems = cached.items,
                     danmakuSources = cached.sources,
+                    danmakuSourceSummaries = cached.sourceSummaries,
                     launchScripts = cached.launchScripts
                 )
             }
@@ -195,11 +202,15 @@ class VideoPlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isDanmakuLoading = true) }
             try {
                 val response = api.getDanmakuFull(pool)
-                val items = DanmakuParser.parseFull(response.comment)
+                val comments = DanmakuParser.parseFullComments(response.comment)
+                fullDanmakuComments = comments
+                val sources = response.source ?: emptyList()
+                val items = DanmakuParser.toDisplayItems(comments, sources)
                 _uiState.update {
                     it.copy(
                         danmakuItems = items,
-                        danmakuSources = response.source ?: emptyList(),
+                        danmakuSources = sources,
+                        danmakuSourceSummaries = DanmakuParser.buildSourceSummaries(comments, sources),
                         launchScripts = response.launchScripts ?: emptyList(),
                         isDanmakuLoading = false
                     )
@@ -228,13 +239,19 @@ class VideoPlayerViewModel @Inject constructor(
                 CachedDanmakuPayload.serializer(),
                 cacheFile.readText()
             )
+            val fullComments = when (payload.format) {
+                CachedDanmakuPayload.FORMAT_FULL -> DanmakuParser.parseFullComments(payload.comment)
+                else -> emptyList()
+            }
             val items = when (payload.format) {
-                CachedDanmakuPayload.FORMAT_FULL -> DanmakuParser.parseFull(payload.comment)
+                CachedDanmakuPayload.FORMAT_FULL -> DanmakuParser.toDisplayItems(fullComments, payload.sources ?: emptyList())
                 else -> DanmakuParser.parseV3(payload.comment)
             }
             CachedDanmakuState(
                 items = items,
                 sources = payload.sources ?: emptyList(),
+                sourceSummaries = DanmakuParser.buildSourceSummaries(fullComments, payload.sources ?: emptyList()),
+                fullComments = fullComments,
                 launchScripts = payload.launchScripts ?: emptyList()
             )
         }.getOrNull()
@@ -251,7 +268,37 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     fun refreshDanmaku() {
-        loadDanmaku()
+        val pool = route.danmuPool
+        if (pool.isNullOrBlank()) {
+            loadDanmaku()
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDanmakuRefreshing = true) }
+            try {
+                val response = api.getDanmakuFull(pool, update = true)
+                val appendedComments = DanmakuParser.parseFullComments(response.comment)
+                val mergedComments = mergeFullComments(fullDanmakuComments, appendedComments)
+                fullDanmakuComments = mergedComments
+
+                val sources = uiState.value.danmakuSources
+                _uiState.update {
+                    it.copy(
+                        danmakuItems = DanmakuParser.toDisplayItems(mergedComments, sources),
+                        danmakuSourceSummaries = DanmakuParser.buildSourceSummaries(
+                            comments = mergedComments,
+                            sources = sources,
+                            newCommentCountBySource = appendedComments.groupingBy { comment -> comment.sourceId }.eachCount()
+                        ),
+                        isDanmakuRefreshing = false
+                    )
+                }
+            } catch (_: Exception) {
+                _uiState.update { it.copy(isDanmakuRefreshing = false) }
+                loadDanmaku()
+            }
+        }
     }
 
     fun cacheEpisodes(episodes: List<EpisodeUiItem>) {
@@ -377,6 +424,11 @@ class VideoPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 api.updateDelay(UpdateDelayRequest(pool, delay, sourceId))
+                updateSourceState(
+                    sourceId = sourceId,
+                    sourceTransform = { source -> source.copy(delay = delay) },
+                    summaryTransform = { source -> source.copy(delayMs = delay) }
+                )
             } catch (_: Exception) {}
         }
     }
@@ -386,6 +438,16 @@ class VideoPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 api.updateTimeline(UpdateTimelineRequest(pool, timeline, sourceId))
+                updateSourceState(
+                    sourceId = sourceId,
+                    sourceTransform = { source -> source.copy(timeline = timeline) },
+                    summaryTransform = { source ->
+                        source.copy(
+                            timeline = timeline,
+                            timelineSegmentCount = countTimelineSegments(timeline)
+                        )
+                    }
+                )
             } catch (_: Exception) {}
         }
     }
@@ -430,8 +492,71 @@ class VideoPlayerViewModel @Inject constructor(
     private data class CachedDanmakuState(
         val items: List<DanmakuItem>,
         val sources: List<DanmakuSource>,
+        val sourceSummaries: List<DanmakuSourceSummary>,
+        val fullComments: List<FullDanmakuComment>,
         val launchScripts: List<String>
     )
+
+    private fun updateSourceState(
+        sourceId: Int,
+        sourceTransform: (DanmakuSource) -> DanmakuSource,
+        summaryTransform: (DanmakuSourceSummary) -> DanmakuSourceSummary
+    ) {
+        _uiState.update { state ->
+            state.copy(
+                danmakuSources = state.danmakuSources.map { source ->
+                    if (source.id == sourceId) sourceTransform(source) else source
+                },
+                danmakuSourceSummaries = state.danmakuSourceSummaries.map { source ->
+                    if (source.id == sourceId) summaryTransform(source) else source
+                }
+            )
+        }
+        rebuildDanmakuDisplay()
+    }
+
+    private fun rebuildDanmakuDisplay() {
+        val sources = uiState.value.danmakuSources
+        if (fullDanmakuComments.isEmpty()) return
+        _uiState.update { state ->
+            state.copy(
+                danmakuItems = DanmakuParser.toDisplayItems(fullDanmakuComments, sources),
+                danmakuSourceSummaries = DanmakuParser.buildSourceSummaries(
+                    comments = fullDanmakuComments,
+                    sources = sources,
+                    newCommentCountBySource = state.danmakuSourceSummaries.associate { it.id to it.newCommentCount }
+                )
+            )
+        }
+    }
+
+    private fun countTimelineSegments(timeline: String): Int {
+        if (timeline.isBlank()) return 0
+        return timeline
+            .split(';')
+            .count { it.isNotBlank() && it.trim().split(Regex("\\s+")).size >= 2 }
+    }
+
+    private fun mergeFullComments(
+        existing: List<FullDanmakuComment>,
+        appended: List<FullDanmakuComment>
+    ): List<FullDanmakuComment> {
+        if (existing.isEmpty()) return appended
+        if (appended.isEmpty()) return existing
+
+        return (existing + appended)
+            .distinctBy { comment ->
+                listOf(
+                    comment.sourceId,
+                    comment.rawTimeMs,
+                    comment.type,
+                    comment.color,
+                    comment.text,
+                    comment.sender
+                )
+            }
+            .sortedBy { it.rawTimeMs }
+    }
 
     private fun normalizeResumePositionMs(
         playTimeSeconds: Double?,

@@ -9,6 +9,7 @@ import android.content.pm.ActivityInfo
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,35 +34,44 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -70,6 +81,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -82,6 +94,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,11 +114,14 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import com.kiko.kikoplay.ui.player.components.KikoSlider
+import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -816,13 +832,15 @@ fun VideoPlayerScreen(
             }
 
             // Content info below player
-            PlayerContentInfo(
+            PlayerContentPager(
                 currentMediaId = uiState.mediaId,
                 currentPositionMs = currentPosition,
                 title = uiState.title,
                 animeTitle = uiState.animeTitle,
                 episodes = uiState.episodes,
-                danmakuSources = uiState.danmakuSources,
+                danmakuSourceSummaries = uiState.danmakuSourceSummaries,
+                isDanmakuLoading = uiState.isDanmakuLoading,
+                isDanmakuRefreshing = uiState.isDanmakuRefreshing,
                 onPlayEpisode = { episode ->
                     syncTerminalPlayState(currentPosition, duration)
                     onPlayMedia(
@@ -838,6 +856,7 @@ fun VideoPlayerScreen(
                 onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
                 onRefreshDanmaku = { viewModel.refreshDanmaku() },
                 onUpdateDelay = { id, delay -> viewModel.updateSourceDelay(id, delay) },
+                onUpdateTimeline = { id, timeline -> viewModel.updateSourceTimeline(id, timeline) },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -1579,6 +1598,569 @@ private fun PlayerContentInfo(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PlayerContentPager(
+    currentMediaId: String,
+    currentPositionMs: Long,
+    title: String,
+    animeTitle: String?,
+    episodes: List<EpisodeUiItem>,
+    danmakuSourceSummaries: List<DanmakuSourceSummary>,
+    isDanmakuLoading: Boolean,
+    isDanmakuRefreshing: Boolean,
+    onPlayEpisode: (EpisodeUiItem) -> Unit,
+    onCacheEpisodes: (List<EpisodeUiItem>) -> Unit,
+    onRefreshDanmaku: () -> Unit,
+    onUpdateDelay: (Int, Long) -> Unit,
+    onUpdateTimeline: (Int, String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val tabs = listOf("剧集", "弹幕")
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
+    val coroutineScope = rememberCoroutineScope()
+    val episodeListState = rememberLazyListState()
+    var isEpisodeSelectionMode by remember { mutableStateOf(false) }
+    var selectedEpisodeIds by remember { mutableStateOf(setOf<String>()) }
+
+    LaunchedEffect(pagerState.currentPage, currentMediaId, episodes) {
+        if (pagerState.currentPage != 0) return@LaunchedEffect
+        val currentIndex = episodes.indexOfFirst { it.mediaId == currentMediaId }
+        if (currentIndex >= 0) {
+            episodeListState.scrollToItem(currentIndex)
+        }
+    }
+
+    LaunchedEffect(episodes) {
+        selectedEpisodeIds = selectedEpisodeIds.filterTo(linkedSetOf()) { selectedId ->
+            episodes.any { it.mediaId == selectedId }
+        }
+        if (selectedEpisodeIds.isEmpty()) {
+            isEpisodeSelectionMode = false
+        }
+    }
+
+    Column(modifier = modifier) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            if (animeTitle != null) {
+                Text(animeTitle, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+            }
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
+            tabs.forEachIndexed { index, tab ->
+                Tab(
+                    selected = pagerState.currentPage == index,
+                    onClick = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(index)
+                        }
+                    },
+                    text = { Text(tab) }
+                )
+            }
+        }
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            when (page) {
+                0 -> EpisodeTabPage(
+                    currentMediaId = currentMediaId,
+                    currentPositionMs = currentPositionMs,
+                    episodes = episodes,
+                    episodeListState = episodeListState,
+                    isEpisodeSelectionMode = isEpisodeSelectionMode,
+                    selectedEpisodeIds = selectedEpisodeIds,
+                    onEpisodeSelectionModeChange = { isEpisodeSelectionMode = it },
+                    onSelectedEpisodeIdsChange = { selectedEpisodeIds = it },
+                    onPlayEpisode = onPlayEpisode,
+                    onCacheEpisodes = onCacheEpisodes
+                )
+
+                1 -> DanmakuSourcesPage(
+                    currentPositionMs = currentPositionMs,
+                    danmakuSourceSummaries = danmakuSourceSummaries,
+                    isDanmakuLoading = isDanmakuLoading,
+                    isDanmakuRefreshing = isDanmakuRefreshing,
+                    onRefreshDanmaku = onRefreshDanmaku,
+                    onUpdateDelay = onUpdateDelay,
+                    onUpdateTimeline = onUpdateTimeline
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EpisodeTabPage(
+    currentMediaId: String,
+    currentPositionMs: Long,
+    episodes: List<EpisodeUiItem>,
+    episodeListState: androidx.compose.foundation.lazy.LazyListState,
+    isEpisodeSelectionMode: Boolean,
+    selectedEpisodeIds: Set<String>,
+    onEpisodeSelectionModeChange: (Boolean) -> Unit,
+    onSelectedEpisodeIdsChange: (Set<String>) -> Unit,
+    onPlayEpisode: (EpisodeUiItem) -> Unit,
+    onCacheEpisodes: (List<EpisodeUiItem>) -> Unit
+) {
+    if (episodes.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("当前目录没有可播放的视频条目", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.animation.AnimatedVisibility(visible = isEpisodeSelectionMode) {
+            EpisodeSelectionBar(
+                selectedCount = selectedEpisodeIds.size,
+                onSelectAll = { onSelectedEpisodeIdsChange(episodes.map { it.mediaId }.toSet()) },
+                onClearSelection = {
+                    onEpisodeSelectionModeChange(false)
+                    onSelectedEpisodeIdsChange(emptySet())
+                },
+                onCache = {
+                    onCacheEpisodes(episodes.filter { it.mediaId in selectedEpisodeIds })
+                    onEpisodeSelectionModeChange(false)
+                    onSelectedEpisodeIdsChange(emptySet())
+                }
+            )
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = episodeListState,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            itemsIndexed(episodes, key = { _, episode -> episode.mediaId }) { _, episode ->
+                val isCurrent = episode.mediaId == currentMediaId
+                val isSelected = selectedEpisodeIds.contains(episode.mediaId)
+                EpisodeListItem(
+                    episode = episode,
+                    isCurrent = isCurrent,
+                    isSelected = isSelected,
+                    isSelectionMode = isEpisodeSelectionMode,
+                    currentPositionMs = if (isCurrent) currentPositionMs else null,
+                    onClick = {
+                        if (isEpisodeSelectionMode) {
+                            val updatedSelection = selectedEpisodeIds.toMutableSet().apply {
+                                if (!add(episode.mediaId)) remove(episode.mediaId)
+                            }
+                            onSelectedEpisodeIdsChange(updatedSelection)
+                            if (updatedSelection.isEmpty()) {
+                                onEpisodeSelectionModeChange(false)
+                            }
+                        } else {
+                            onPlayEpisode(episode)
+                        }
+                    },
+                    onLongClick = {
+                        if (!isEpisodeSelectionMode) {
+                            onEpisodeSelectionModeChange(true)
+                            onSelectedEpisodeIdsChange(setOf(episode.mediaId))
+                        }
+                    }
+                )
+            }
+            item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun DanmakuSourcesPage(
+    currentPositionMs: Long,
+    danmakuSourceSummaries: List<DanmakuSourceSummary>,
+    isDanmakuLoading: Boolean,
+    isDanmakuRefreshing: Boolean,
+    onRefreshDanmaku: () -> Unit,
+    onUpdateDelay: (Int, Long) -> Unit,
+    onUpdateTimeline: (Int, String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("弹幕来源", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = if (danmakuSourceSummaries.isEmpty()) {
+                        "显示每个来源的数量、分布与同步信息"
+                    } else {
+                        "共 ${danmakuSourceSummaries.sumOf { it.commentCount }} 条弹幕"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            FilledTonalButton(
+                onClick = onRefreshDanmaku,
+                enabled = !isDanmakuLoading && !isDanmakuRefreshing
+            ) {
+                if (isDanmakuRefreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(if (isDanmakuRefreshing) "刷新中" else "刷新弹幕")
+            }
+        }
+
+        if (isDanmakuLoading && danmakuSourceSummaries.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (danmakuSourceSummaries.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("暂无弹幕源信息", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                itemsIndexed(danmakuSourceSummaries, key = { _, source -> source.id }) { _, source ->
+                    DanmakuSourceCard(
+                        source = source,
+                        currentPositionMs = currentPositionMs,
+                        onUpdateDelay = onUpdateDelay,
+                        onUpdateTimeline = onUpdateTimeline
+                    )
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DanmakuSourceCard(
+    source: DanmakuSourceSummary,
+    currentPositionMs: Long,
+    onUpdateDelay: (Int, Long) -> Unit,
+    onUpdateTimeline: (Int, String) -> Unit
+) {
+    var showEditDialog by remember { mutableStateOf(false) }
+    var initialTimePointMs by remember { mutableLongStateOf(0L) }
+
+    if (showEditDialog) {
+        DanmakuSourceEditDialog(
+            source = source,
+            initialTimePointMs = initialTimePointMs,
+            onDismiss = { showEditDialog = false },
+            onSave = { delayMs, timeline ->
+                if (delayMs != source.delayMs) {
+                    onUpdateDelay(source.id, delayMs)
+                }
+                if (timeline != (source.timeline ?: "")) {
+                    onUpdateTimeline(source.id, timeline)
+                }
+                showEditDialog = false
+            }
+        )
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = source.name,
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    text = buildList {
+                        add("弹幕条数 ${source.commentCount}")
+                        source.scriptName?.let { add(it) }
+                        source.scriptId?.let { add(it) }
+                    }.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = buildList {
+                        add("延迟: ${formatDelaySeconds(source.delayMs)}")
+                        add("时间轴段数: ${source.timelineSegmentCount}")
+                        source.durationSeconds
+                            ?.takeIf { it > 0.0 }
+                            ?.let { add("源时长: ${formatSourceDuration(it)}") }
+                    }.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!source.timeline.isNullOrBlank()) {
+                    Text(
+                        text = "时间轴: ${source.timeline}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            IconButton(
+                onClick = {
+                    initialTimePointMs = currentPositionMs.coerceAtLeast(0L)
+                    showEditDialog = true
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "编辑弹幕源"
+                )
+            }
+        }
+    }
+}
+
+private data class TimelineEditorEntry(
+    val timePointMs: Long,
+    val offsetMs: Long
+)
+
+private fun parseTimelineEditorEntries(timeline: String?): List<TimelineEditorEntry> {
+    if (timeline.isNullOrBlank()) return emptyList()
+
+    return timeline
+        .split(';')
+        .mapNotNull { segment ->
+            val parts = segment
+                .trim()
+                .split(Regex("\\s+"))
+                .filter { it.isNotBlank() }
+            if (parts.size < 2) return@mapNotNull null
+
+            val timePointMs = parts[0].toLongOrNull() ?: return@mapNotNull null
+            val offsetMs = parts[1].toLongOrNull() ?: return@mapNotNull null
+            TimelineEditorEntry(timePointMs = timePointMs, offsetMs = offsetMs)
+        }
+        .sortedBy { it.timePointMs }
+        .fold(mutableListOf<TimelineEditorEntry>()) { acc, entry ->
+            if (acc.isNotEmpty() && acc.last().timePointMs == entry.timePointMs) {
+                acc[acc.lastIndex] = entry
+            } else {
+                acc += entry
+            }
+            acc
+        }
+}
+
+private fun formatTimelineEditorEntries(entries: List<TimelineEditorEntry>): String {
+    return entries
+        .sortedBy { it.timePointMs }
+        .joinToString(";") { entry -> "${entry.timePointMs} ${entry.offsetMs}" }
+}
+
+@Composable
+private fun DanmakuSourceEditDialog(
+    source: DanmakuSourceSummary,
+    initialTimePointMs: Long,
+    onDismiss: () -> Unit,
+    onSave: (delayMs: Long, timeline: String) -> Unit
+) {
+    var delayText by remember(source.id, source.delayMs) {
+        mutableStateOf(formatMillisecondsAsSeconds(source.delayMs))
+    }
+    var timelineEntries by remember(source.id, source.timeline) {
+        mutableStateOf(parseTimelineEditorEntries(source.timeline))
+    }
+    var newTimePointText by remember(source.id, initialTimePointMs) {
+        mutableStateOf(formatMillisecondsAsSeconds(initialTimePointMs.coerceAtLeast(0L)))
+    }
+    var newOffsetText by remember(source.id) { mutableStateOf("") }
+    val parsedDelayMs = parseSecondsTextToMs(delayText, allowNegative = true)
+    val isDelayValid = parsedDelayMs != null
+    val parsedTimePointMs = parseSecondsTextToMs(newTimePointText, allowNegative = false)
+    val parsedOffsetMs = parseSecondsTextToMs(newOffsetText, allowNegative = true)
+    val isTimePointValid = parsedTimePointMs != null
+    val isTimePointInputError = newTimePointText.isNotBlank() && !isTimePointValid
+    val isOffsetInputError = newOffsetText.isNotBlank() && parsedOffsetMs == null
+    val canAddTimelineEntry = parsedTimePointMs != null && parsedOffsetMs != null
+    val hasExistingTimePoint = parsedTimePointMs != null && timelineEntries.any { it.timePointMs == parsedTimePointMs }
+    val formattedTimeline = formatTimelineEditorEntries(timelineEntries)
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑弹幕源") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = source.name,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedTextField(
+                    value = delayText,
+                    onValueChange = { delayText = it },
+                    label = { Text("延迟（秒）") },
+                    placeholder = { Text("可输入小数或负数，例如 0.3") },
+                    singleLine = true,
+                    isError = !isDelayValid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "时间轴（时间点 / 偏移单位：秒）",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    OutlinedTextField(
+                        value = newTimePointText,
+                        onValueChange = { newTimePointText = it },
+                        label = { Text("时间点（秒）") },
+                        placeholder = { Text("例如 362.317") },
+                        singleLine = true,
+                        isError = isTimePointInputError,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = newOffsetText,
+                        onValueChange = { newOffsetText = it },
+                        label = { Text("偏移（秒）") },
+                        placeholder = { Text("例如 -0.3") },
+                        singleLine = true,
+                        isError = isOffsetInputError,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = "输入单位都是秒，偏移支持负数。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FilledTonalButton(
+                    onClick = {
+                        val timePointMs = parsedTimePointMs ?: return@FilledTonalButton
+                        val offsetMs = parsedOffsetMs ?: return@FilledTonalButton
+                        timelineEntries = (
+                            timelineEntries.filterNot { it.timePointMs == timePointMs } +
+                                TimelineEditorEntry(timePointMs = timePointMs, offsetMs = offsetMs)
+                            )
+                            .sortedBy { it.timePointMs }
+                        newTimePointText = ""
+                        newOffsetText = ""
+                    },
+                    enabled = canAddTimelineEntry,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(if (hasExistingTimePoint) "确认更新" else "确认添加")
+                }
+                if (timelineEntries.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(timelineEntries) { index, entry ->
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "时间点: ${formatMillisecondsAsSeconds(entry.timePointMs)} 秒",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            text = "偏移: ${formatMillisecondsAsSeconds(entry.offsetMs)} 秒",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            timelineEntries = timelineEntries.filterIndexed { itemIndex, _ ->
+                                                itemIndex != index
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "删除时间轴条目"
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(parsedDelayMs ?: source.delayMs, formattedTimeline) },
+                enabled = isDelayValid
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
 @Composable
 private fun EpisodeListItem(
     episode: EpisodeUiItem,
@@ -1707,6 +2289,45 @@ private fun formatEpisodeDuration(seconds: Long): String {
     val s = seconds % 60
     return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
     else String.format("%d:%02d", m, s)
+}
+
+private fun formatSourceDuration(seconds: Double): String {
+    return formatEpisodeDuration(seconds.toLong().coerceAtLeast(0L))
+}
+
+private fun formatDelaySeconds(delayMs: Long): String {
+    val isNegative = delayMs < 0
+    val absoluteMs = kotlin.math.abs(delayMs)
+    val secondsPart = absoluteMs / 1000
+    val millisPart = absoluteMs % 1000
+    val fraction = when {
+        millisPart == 0L -> ""
+        millisPart % 100L == 0L -> ".${millisPart / 100}"
+        millisPart % 10L == 0L -> ".${(millisPart / 10).toString().padStart(2, '0')}"
+        else -> ".${millisPart.toString().padStart(3, '0')}"
+    }
+    val prefix = if (isNegative) "-" else ""
+    return "${prefix}${secondsPart}${fraction}s"
+}
+
+private fun formatMillisecondsAsSeconds(valueMs: Long): String {
+    val seconds = BigDecimal.valueOf(valueMs)
+        .divide(BigDecimal.valueOf(1000), 3, RoundingMode.HALF_UP)
+        .stripTrailingZeros()
+    return seconds.toPlainString()
+}
+
+private fun parseSecondsTextToMs(text: String, allowNegative: Boolean): Long? {
+    val normalized = text.trim()
+    if (normalized.isEmpty()) return null
+
+    val seconds = normalized.toBigDecimalOrNull() ?: return null
+    if (!allowNegative && seconds < BigDecimal.ZERO) return null
+
+    return seconds
+        .multiply(BigDecimal.valueOf(1000))
+        .setScale(0, RoundingMode.HALF_UP)
+        .longValueExact()
 }
 
 private fun formatTime(ms: Long): String {

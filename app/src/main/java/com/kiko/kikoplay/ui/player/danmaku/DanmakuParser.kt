@@ -1,6 +1,7 @@
 package com.kiko.kikoplay.ui.player.danmaku
 
 import android.graphics.Color
+import com.kiko.kikoplay.data.remote.model.DanmakuSource
 import master.flame.danmaku.danmaku.model.BaseDanmaku
 import master.flame.danmaku.danmaku.model.IDanmakus
 import master.flame.danmaku.danmaku.model.android.Danmakus
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.math.roundToLong
 
 data class DanmakuItem(
     val time: Float,    // seconds
@@ -17,6 +19,32 @@ data class DanmakuItem(
     val color: Int,
     val text: String,
     val sender: String = ""
+)
+
+data class FullDanmakuComment(
+    val rawTimeMs: Long,
+    val type: Int,
+    val color: Int,
+    val sourceId: Int,
+    val text: String,
+    val sender: String = ""
+)
+
+data class DanmakuSourceSummary(
+    val id: Int,
+    val name: String,
+    val commentCount: Int,
+    val newCommentCount: Int,
+    val scrollCount: Int,
+    val topCount: Int,
+    val bottomCount: Int,
+    val senderCount: Int,
+    val delayMs: Long,
+    val durationSeconds: Double?,
+    val scriptName: String?,
+    val scriptId: String?,
+    val timeline: String?,
+    val timelineSegmentCount: Int
 )
 
 object DanmakuParser {
@@ -36,14 +64,19 @@ object DanmakuParser {
         }
     }
 
-    fun parseFull(data: List<JsonArray>): List<DanmakuItem> {
+    fun parseFull(data: List<JsonArray>, sources: List<DanmakuSource> = emptyList()): List<DanmakuItem> {
+        return toDisplayItems(parseFullComments(data), sources)
+    }
+
+    fun parseFullComments(data: List<JsonArray>): List<FullDanmakuComment> {
         return data.mapNotNull { arr ->
             if (arr.size < 6) return@mapNotNull null
             try {
-                DanmakuItem(
-                    time = arr[0].jsonPrimitive.double.toFloat(),
+                FullDanmakuComment(
+                    rawTimeMs = (arr[0].jsonPrimitive.double * 1000.0).roundToLong(),
                     type = arr[1].jsonPrimitive.int,
                     color = arr[2].jsonPrimitive.int,
+                    sourceId = arr[3].jsonPrimitive.int,
                     text = arr[4].jsonPrimitive.content,
                     sender = arr[5].jsonPrimitive.content
                 )
@@ -51,8 +84,121 @@ object DanmakuParser {
         }
     }
 
+    fun toDisplayItems(
+        comments: List<FullDanmakuComment>,
+        sources: List<DanmakuSource>
+    ): List<DanmakuItem> {
+        val timingBySourceId = sources.associate { source ->
+            source.id to SourceTiming(
+                delayMs = source.delay,
+                timelineEntries = parseTimeline(source.timeline)
+            )
+        }
+
+        return comments
+            .map { comment ->
+                val adjustedTimeMs = applySourceTiming(
+                    rawTimeMs = comment.rawTimeMs,
+                    timing = timingBySourceId[comment.sourceId]
+                )
+                adjustedTimeMs to DanmakuItem(
+                    time = adjustedTimeMs / 1000f,
+                    type = comment.type,
+                    color = comment.color,
+                    text = comment.text,
+                    sender = comment.sender
+                )
+            }
+            .sortedBy { it.first }
+            .map { it.second }
+    }
+
+    fun buildSourceSummaries(
+        comments: List<FullDanmakuComment>,
+        sources: List<DanmakuSource>,
+        newCommentCountBySource: Map<Int, Int> = emptyMap()
+    ): List<DanmakuSourceSummary> {
+        val commentsBySource = comments.groupBy { it.sourceId }
+        val sourceById = sources.associateBy { it.id }
+        val orderedSourceIds = buildList {
+            addAll(sources.map { it.id })
+            addAll(commentsBySource.keys.filterNot(sourceById::containsKey).sorted())
+        }
+
+        return orderedSourceIds.map { sourceId ->
+            val source = sourceById[sourceId]
+            val sourceComments = commentsBySource[sourceId].orEmpty()
+            val timelineEntries = parseTimeline(source?.timeline)
+            DanmakuSourceSummary(
+                id = sourceId,
+                name = source?.name?.takeIf { it.isNotBlank() } ?: "来源 #$sourceId",
+                commentCount = sourceComments.size,
+                newCommentCount = newCommentCountBySource[sourceId] ?: 0,
+                scrollCount = sourceComments.count { it.type == 0 },
+                topCount = sourceComments.count { it.type == 1 },
+                bottomCount = sourceComments.count { it.type == 2 },
+                senderCount = sourceComments
+                    .asSequence()
+                    .map { it.sender.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .count(),
+                delayMs = source?.delay ?: 0L,
+                durationSeconds = source?.duration,
+                scriptName = source?.scriptName?.takeIf { it.isNotBlank() },
+                scriptId = source?.scriptId?.takeIf { it.isNotBlank() },
+                timeline = source?.timeline,
+                timelineSegmentCount = timelineEntries.size
+            )
+        }
+    }
+
     fun createParser(items: List<DanmakuItem>): BaseDanmakuParser {
         return KikoPlayDanmakuParser(items)
+    }
+
+    private data class SourceTiming(
+        val delayMs: Long,
+        val timelineEntries: List<TimelineEntry>
+    )
+
+    private data class TimelineEntry(
+        val timePointMs: Long,
+        val offsetMs: Long
+    )
+
+    private fun parseTimeline(timeline: String?): List<TimelineEntry> {
+        if (timeline.isNullOrBlank()) return emptyList()
+
+        return timeline
+            .split(';')
+            .mapNotNull { segment ->
+                val parts = segment
+                    .trim()
+                    .split(Regex("\\s+"))
+                    .filter { it.isNotBlank() }
+                if (parts.size < 2) return@mapNotNull null
+                val timePointMs = parts[0].toLongOrNull() ?: return@mapNotNull null
+                val offsetMs = parts[1].toLongOrNull() ?: return@mapNotNull null
+                TimelineEntry(
+                    timePointMs = timePointMs,
+                    offsetMs = offsetMs
+                )
+            }
+            .sortedBy { it.timePointMs }
+    }
+
+    private fun applySourceTiming(
+        rawTimeMs: Long,
+        timing: SourceTiming?
+    ): Long {
+        if (timing == null) return rawTimeMs.coerceAtLeast(0L)
+
+        val timelineOffsetMs = timing.timelineEntries
+            .lastOrNull { rawTimeMs >= it.timePointMs }
+            ?.offsetMs
+            ?: 0L
+        return (rawTimeMs + timelineOffsetMs + timing.delayMs).coerceAtLeast(0L)
     }
 
     private fun isLightColor(color: Int): Boolean {
