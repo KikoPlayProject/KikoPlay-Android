@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,16 +57,23 @@ import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Tab
@@ -1794,7 +1802,7 @@ private fun DanmakuSourcesPage(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1804,13 +1812,16 @@ private fun DanmakuSourcesPage(
                     text = if (danmakuSourceSummaries.isEmpty()) {
                         "显示每个来源的数量、分布与同步信息"
                     } else {
-                        "共 ${danmakuSourceSummaries.sumOf { it.commentCount }} 条弹幕"
+                        val totalCount = danmakuSourceSummaries.sumOf { it.commentCount }
+                        val totalSenders = danmakuSourceSummaries.sumOf { it.senderCount }
+                        if (totalSenders > 0) "共 $totalCount 条弹幕 · $totalSenders 位发送者"
+                        else "共 $totalCount 条弹幕"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            FilledTonalButton(
+            OutlinedButton(
                 onClick = onRefreshDanmaku,
                 enabled = !isDanmakuLoading && !isDanmakuRefreshing
             ) {
@@ -1820,9 +1831,13 @@ private fun DanmakuSourcesPage(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(if (isDanmakuRefreshing) "刷新中" else "刷新弹幕")
             }
         }
@@ -1848,7 +1863,7 @@ private fun DanmakuSourcesPage(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 itemsIndexed(danmakuSourceSummaries, key = { _, source -> source.id }) { _, source ->
                     DanmakuSourceCard(
@@ -1858,7 +1873,7 @@ private fun DanmakuSourcesPage(
                         onUpdateTimeline = onUpdateTimeline
                     )
                 }
-                item { Spacer(Modifier.height(8.dp)) }
+                item { Spacer(Modifier.height(10.dp)) }
             }
         }
     }
@@ -1896,66 +1911,168 @@ private fun DanmakuSourceCard(
             .fillMaxWidth()
             .padding(horizontal = 12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = source.name,
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    text = buildList {
-                        add("弹幕条数 ${source.commentCount}")
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = source.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    val scriptInfo = buildList {
                         source.scriptName?.let { add(it) }
                         source.scriptId?.let { add(it) }
-                    }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = buildList {
-                        add("延迟: ${formatDelaySeconds(source.delayMs)}")
-                        add("时间轴段数: ${source.timelineSegmentCount}")
-                        source.durationSeconds
-                            ?.takeIf { it > 0.0 }
-                            ?.let { add("源时长: ${formatSourceDuration(it)}") }
-                    }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (!source.timeline.isNullOrBlank()) {
-                    Text(
-                        text = "时间轴: ${source.timeline}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                    }.joinToString(" · ")
+                    if (scriptInfo.isNotEmpty()) {
+                        Text(
+                            text = scriptInfo,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                FilledTonalIconButton(
+                    onClick = {
+                        initialTimePointMs = currentPositionMs.coerceAtLeast(0L)
+                        showEditDialog = true
+                    },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "编辑弹幕源",
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
-            Spacer(Modifier.width(8.dp))
-
-            IconButton(
-                onClick = {
-                    initialTimePointMs = currentPositionMs.coerceAtLeast(0L)
-                    showEditDialog = true
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "编辑弹幕源"
+                DanmakuStatChip(
+                    count = source.commentCount,
+                    label = "总计",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                DanmakuStatChip(
+                    count = source.scrollCount,
+                    label = "滚动",
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.weight(1f)
+                )
+                DanmakuStatChip(
+                    count = source.topCount,
+                    label = "顶部",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.weight(1f)
+                )
+                DanmakuStatChip(
+                    count = source.bottomCount,
+                    label = "底部",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
                 )
             }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SyncInfoItem(
+                    icon = Icons.Default.Timer,
+                    text = "延迟 ${formatDelaySeconds(source.delayMs)}"
+                )
+                if (source.timelineSegmentCount > 0) {
+                    SyncInfoItem(
+                        icon = Icons.Default.Timeline,
+                        text = "时间轴 ×${source.timelineSegmentCount}"
+                    )
+                }
+                source.durationSeconds
+                    ?.takeIf { it > 0.0 }
+                    ?.let {
+                        SyncInfoItem(
+                            icon = Icons.Default.Schedule,
+                            text = formatSourceDuration(it)
+                        )
+                    }
+            }
         }
+    }
+}
+
+@Composable
+private fun DanmakuStatChip(
+    count: Int,
+    label: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = color.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = formatCount(count),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = color
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncInfoItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -2293,6 +2410,14 @@ private fun formatEpisodeDuration(seconds: Long): String {
 
 private fun formatSourceDuration(seconds: Double): String {
     return formatEpisodeDuration(seconds.toLong().coerceAtLeast(0L))
+}
+
+private fun formatCount(count: Int): String {
+    return when {
+        count >= 10_000 -> String.format("%.1fw", count / 10_000.0)
+        count >= 1_000 -> String.format("%.1fk", count / 1000.0)
+        else -> count.toString()
+    }
 }
 
 private fun formatDelaySeconds(delayMs: Long): String {
