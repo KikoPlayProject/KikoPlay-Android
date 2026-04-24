@@ -160,14 +160,7 @@ fun PlaylistBrowserScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = {
-                            if (uiState.pathStack.isNotEmpty()) {
-                                saveCurrentScrollPosition()
-                                viewModel.navigateUp()
-                            } else {
-                                onBack()
-                            }
-                        }
+                        onClick = onBack
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = LABEL_BACK)
                     }

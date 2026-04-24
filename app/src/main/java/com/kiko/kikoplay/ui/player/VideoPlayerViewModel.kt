@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.kiko.kikoplay.data.model.PlayerPreferences
 import com.kiko.kikoplay.data.local.model.CachedDanmakuPayload
 import com.kiko.kikoplay.data.remote.ConnectionManager
 import com.kiko.kikoplay.data.remote.KikoPlayApi
@@ -15,6 +16,7 @@ import com.kiko.kikoplay.data.remote.model.ScreenshotRequest
 import com.kiko.kikoplay.data.remote.model.LaunchDanmakuRequest
 import com.kiko.kikoplay.data.repository.CacheRepository
 import com.kiko.kikoplay.data.repository.PlaylistRepository
+import com.kiko.kikoplay.data.repository.SettingsRepository
 import com.kiko.kikoplay.data.repository.WatchHistoryRepository
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuItem
@@ -27,6 +29,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -64,6 +67,8 @@ data class PlayerUiState(
     val isDanmakuLoading: Boolean = false,
     val isDanmakuRefreshing: Boolean = false,
     val isDanmakuVisible: Boolean = true,
+    val playerPreferences: PlayerPreferences = PlayerPreferences(),
+    val isSyncPlayProgressEnabled: Boolean = true,
     val isFullscreen: Boolean = false,
     val controlsVisible: Boolean = true,
     val error: String? = null
@@ -78,6 +83,7 @@ class VideoPlayerViewModel @Inject constructor(
     private val cacheRepository: CacheRepository,
     private val playlistRepository: PlaylistRepository,
     private val connectionManager: ConnectionManager,
+    private val settingsRepository: SettingsRepository,
     private val json: Json
 ) : ViewModel() {
     private val route = savedStateHandle.toRoute<VideoPlayerRoute>()
@@ -105,9 +111,28 @@ class VideoPlayerViewModel @Inject constructor(
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
     init {
+        observeSettings()
         loadEpisodes()
         loadSubtitle()
         loadDanmaku()
+    }
+
+    private fun observeSettings() {
+        viewModelScope.launch {
+            settingsRepository.playerPreferences.collect { preferences ->
+                _uiState.update {
+                    it.copy(
+                        playerPreferences = preferences,
+                        isDanmakuVisible = preferences.isDanmakuVisible
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.syncPlayProgress.collect { enabled ->
+                _uiState.update { it.copy(isSyncPlayProgressEnabled = enabled) }
+            }
+        }
     }
 
     private fun loadEpisodes() {
@@ -319,7 +344,30 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     fun toggleDanmaku() {
-        _uiState.update { it.copy(isDanmakuVisible = !it.isDanmakuVisible) }
+        val updatedPreferences = uiState.value.playerPreferences.copy(
+            isDanmakuVisible = !uiState.value.isDanmakuVisible
+        )
+        _uiState.update {
+            it.copy(
+                isDanmakuVisible = updatedPreferences.isDanmakuVisible,
+                playerPreferences = updatedPreferences
+            )
+        }
+        viewModelScope.launch {
+            settingsRepository.setPlayerPreferences(updatedPreferences)
+        }
+    }
+
+    fun updatePlayerPreferences(preferences: PlayerPreferences) {
+        _uiState.update {
+            it.copy(
+                playerPreferences = preferences,
+                isDanmakuVisible = preferences.isDanmakuVisible
+            )
+        }
+        viewModelScope.launch {
+            settingsRepository.setPlayerPreferences(preferences)
+        }
     }
 
     fun setFullscreen(fullscreen: Boolean) {
@@ -406,6 +454,7 @@ class VideoPlayerViewModel @Inject constructor(
         }
         // Sync to PC
         if (uiState.value.sourceType != 0) return
+        if (!uiState.value.isSyncPlayProgressEnabled) return
         viewModelScope.launch {
             try {
                 api.updatePlayTime(

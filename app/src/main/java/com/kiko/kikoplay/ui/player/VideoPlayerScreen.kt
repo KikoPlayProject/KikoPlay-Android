@@ -101,10 +101,12 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -124,6 +126,8 @@ import androidx.media3.exoplayer.SeekParameters
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
+import com.kiko.kikoplay.ui.player.danmaku.toPlayerPreferences
+import com.kiko.kikoplay.ui.player.danmaku.toDanmakuSettings
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -444,8 +448,7 @@ fun VideoPlayerScreen(
     var showScreenshotDialog by remember { mutableStateOf(false) }
     var showDanmakuSettings by remember { mutableStateOf(false) }
 
-    // Danmaku settings state
-    var danmakuSettings by remember { mutableStateOf(com.kiko.kikoplay.ui.player.danmaku.DanmakuSettings()) }
+    val danmakuSettings = uiState.playerPreferences.toDanmakuSettings()
 
     // Apply danmaku settings to DanmakuContext
     LaunchedEffect(danmakuSettings, danmakuContext) {
@@ -685,7 +688,7 @@ fun VideoPlayerScreen(
             ) {
                 com.kiko.kikoplay.ui.player.danmaku.DanmakuSettingsPanel(
                     settings = danmakuSettings,
-                    onSettingsChange = { danmakuSettings = it }
+                    onSettingsChange = { viewModel.updatePlayerPreferences(it.toPlayerPreferences(uiState.isDanmakuVisible)) }
                 )
             }
         }
@@ -940,6 +943,7 @@ private fun GestureLayer(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    val hapticFeedback = LocalHapticFeedback.current
     val horizontalSlopPx = with(density) { 12.dp.toPx() }
     val verticalSlopPx = with(density) { 12.dp.toPx() }
     val cancelThresholdPx = with(density) { 48.dp.toPx() }
@@ -959,6 +963,7 @@ private fun GestureLayer(
     val latestOnVolumeChangeFinish by rememberUpdatedState(onVolumeChangeFinish)
     val latestOnSpeedBoostStart by rememberUpdatedState(onSpeedBoostStart)
     val latestOnSpeedBoostEnd by rememberUpdatedState(onSpeedBoostEnd)
+    val latestHapticFeedback by rememberUpdatedState(hapticFeedback)
     val maxVolume = remember(audioManager) { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
     val latestPlaybackSpeed by rememberUpdatedState(playbackSpeed)
 
@@ -992,7 +997,7 @@ private fun GestureLayer(
                         } else {
                             0f
                         }
-                        val isBottomRegion = startY >= layerHeightPx * 0.78f
+                        val isBottomRegion = startY >= layerHeightPx * 0.5f
 
                         var totalHorizontalDrag = 0f
                         var totalVerticalDrag = 0f
@@ -1007,9 +1012,10 @@ private fun GestureLayer(
 
                         val speedBoostJob = if (isBottomRegion) {
                             launch {
-                                delay(2000)
+                                delay(1000)
                                 speedBoostTriggered = true
                                 speedBoostActive = true
+                                latestHapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                 latestOnSpeedBoostStart()
                             }
                         } else {
@@ -1374,7 +1380,7 @@ private fun CenterSeekPreview(
         GestureOverlayMode.Seek -> if (cancelled) "上滑后松开取消调整" else "松开后跳转"
         GestureOverlayMode.Brightness -> "左侧上下滑动调整"
         GestureOverlayMode.Volume -> "右侧上下滑动调整"
-        GestureOverlayMode.Speed -> if (speedBoostActive) "松开后恢复原速" else "底部长按 2 秒触发"
+        GestureOverlayMode.Speed -> if (speedBoostActive) "松开后恢复原速" else "下半区域长按 1 秒触发"
     }
 
     Column(

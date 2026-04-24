@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.kiko.kikoplay.data.model.PlayerPreferences
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 
 data class DanmakuSettings(
@@ -40,6 +41,33 @@ data class DanmakuSettings(
     val showBottom: Boolean = true,
     val playbackSpeed: Float = 1f
 )
+
+fun PlayerPreferences.toDanmakuSettings(): DanmakuSettings {
+    return DanmakuSettings(
+        alpha = danmakuAlpha,
+        fontSize = danmakuFontSize,
+        speed = danmakuSpeed,
+        displayArea = danmakuDisplayArea,
+        showScroll = showScrollDanmaku,
+        showTop = showTopDanmaku,
+        showBottom = showBottomDanmaku,
+        playbackSpeed = playbackSpeed
+    )
+}
+
+fun DanmakuSettings.toPlayerPreferences(isDanmakuVisible: Boolean): PlayerPreferences {
+    return PlayerPreferences(
+        isDanmakuVisible = isDanmakuVisible,
+        danmakuAlpha = alpha,
+        danmakuFontSize = fontSize,
+        danmakuSpeed = speed,
+        danmakuDisplayArea = displayArea,
+        showScrollDanmaku = showScroll,
+        showTopDanmaku = showTop,
+        showBottomDanmaku = showBottom,
+        playbackSpeed = playbackSpeed
+    )
+}
 
 private val PanelShape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
 private val CardShape = RoundedCornerShape(24.dp)
