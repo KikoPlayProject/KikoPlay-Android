@@ -31,12 +31,14 @@ class SettingsRepository @Inject constructor(
         val KEY_PLAYER_SHOW_TOP_DANMAKU = booleanPreferencesKey("player_show_top_danmaku")
         val KEY_PLAYER_SHOW_BOTTOM_DANMAKU = booleanPreferencesKey("player_show_bottom_danmaku")
         val KEY_PLAYER_PLAYBACK_SPEED = floatPreferencesKey("player_playback_speed")
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
     }
 
     val cachePath: Flow<String> = dataStore.data.map { it[KEY_CACHE_PATH] ?: "" }
     val maxCacheSize: Flow<Long> = dataStore.data.map { it[KEY_MAX_CACHE_SIZE] ?: 0L }
     val autoClearCache: Flow<Boolean> = dataStore.data.map { it[KEY_AUTO_CLEAR_CACHE] ?: false }
     val syncPlayProgress: Flow<Boolean> = dataStore.data.map { it[KEY_SYNC_PLAY_PROGRESS] ?: true }
+    val themeMode: Flow<String> = dataStore.data.map { it[KEY_THEME_MODE] ?: "system" }
     val playerPreferences: Flow<PlayerPreferences> = dataStore.data.map { preferences ->
         PlayerPreferences(
             isDanmakuVisible = preferences[KEY_PLAYER_DANMAKU_VISIBLE] ?: true,
@@ -65,6 +67,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setSyncPlayProgress(enabled: Boolean) {
         dataStore.edit { it[KEY_SYNC_PLAY_PROGRESS] = enabled }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        dataStore.edit { it[KEY_THEME_MODE] = mode }
     }
 
     suspend fun setPlayerPreferences(preferences: PlayerPreferences) {

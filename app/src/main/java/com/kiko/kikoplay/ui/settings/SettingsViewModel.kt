@@ -27,6 +27,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope, SharingStarted.WhileSubscribed(5000), true
     )
 
+    val themeMode: StateFlow<String> = settingsRepository.themeMode.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), "system"
+    )
+
     fun setMaxCacheSize(bytes: Long) {
         viewModelScope.launch { settingsRepository.setMaxCacheSize(bytes) }
     }
@@ -37,5 +41,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setSyncPlayProgress(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setSyncPlayProgress(enabled) }
+    }
+
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch { settingsRepository.setThemeMode(mode) }
     }
 }

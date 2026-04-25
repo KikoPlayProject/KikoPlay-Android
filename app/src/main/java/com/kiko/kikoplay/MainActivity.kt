@@ -3,13 +3,16 @@ package com.kiko.kikoplay
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -20,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.lifecycleScope
 import com.kiko.kikoplay.data.repository.CacheRepository
 import com.kiko.kikoplay.data.repository.ConnectionRepository
+import com.kiko.kikoplay.data.repository.SettingsRepository
 import com.kiko.kikoplay.ui.navigation.KikoBottomBar
 import com.kiko.kikoplay.ui.navigation.KikoNavHost
 import com.kiko.kikoplay.ui.navigation.TopLevelDestination
@@ -38,6 +42,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var cacheRepository: CacheRepository
 
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lifecycleScope.launch {
@@ -45,7 +52,37 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         setContent {
-            KikoPlayTheme {
+            val themeMode by settingsRepository.themeMode
+                .collectAsStateWithLifecycle(initialValue = "system")
+            val resolvedDarkTheme = when (themeMode) {
+                "dark" -> true
+                "light" -> false
+                else -> isSystemInDarkTheme()
+            }
+
+            DisposableEffect(resolvedDarkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (resolvedDarkTheme) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    },
+                    navigationBarStyle = if (resolvedDarkTheme) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    }
+                )
+                onDispose {}
+            }
+
+            KikoPlayTheme(darkTheme = resolvedDarkTheme) {
                 val navController = rememberNavController()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination

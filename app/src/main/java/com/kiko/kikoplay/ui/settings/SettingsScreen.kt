@@ -45,14 +45,31 @@ fun SettingsScreen(
     val maxCacheSize by viewModel.maxCacheSize.collectAsStateWithLifecycle()
     val autoClearCache by viewModel.autoClearCache.collectAsStateWithLifecycle()
     val syncPlayProgress by viewModel.syncPlayProgress.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showCacheSizeDialog by remember { mutableStateOf(false) }
+    var showThemeModeDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
+        // Appearance settings group
+        SettingsGroupHeader("外观")
+
+        SettingsClickItem(
+            title = "深色模式",
+            subtitle = when (themeMode) {
+                "light" -> "浅色"
+                "dark" -> "深色"
+                else -> "跟随系统"
+            },
+            onClick = { showThemeModeDialog = true }
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
         // Cache settings group
         SettingsGroupHeader("缓存设置")
 
@@ -131,6 +148,18 @@ fun SettingsScreen(
             onSelect = {
                 viewModel.setMaxCacheSize(it)
                 showCacheSizeDialog = false
+            }
+        )
+    }
+
+    // Theme mode dialog
+    if (showThemeModeDialog) {
+        ThemeModeDialog(
+            currentMode = themeMode,
+            onDismiss = { showThemeModeDialog = false },
+            onSelect = {
+                viewModel.setThemeMode(it)
+                showThemeModeDialog = false
             }
         )
     }
@@ -240,4 +269,45 @@ private fun formatCacheSize(bytes: Long): String {
     if (bytes <= 0) return "无限制"
     val gb = bytes / (1024.0 * 1024 * 1024)
     return if (gb >= 1) "%.0f GB".format(gb) else "%.0f MB".format(bytes / (1024.0 * 1024))
+}
+
+@Composable
+private fun ThemeModeDialog(
+    currentMode: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    val options = listOf(
+        "system" to "跟随系统",
+        "light" to "浅色",
+        "dark" to "深色"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("深色模式") },
+        text = {
+            Column {
+                options.forEach { (mode, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (currentMode == mode) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
