@@ -445,6 +445,8 @@ fun VideoPlayerScreen(
     var gestureVolumeFraction by remember { mutableFloatStateOf(0f) }
     var isSpeedBoosting by remember { mutableStateOf(false) }
     val centerSeekPreviewMs = if (isGestureSeeking) gestureSeekPreviewMs else sliderSeekPreviewMs
+    val isPortraitVideo = remember(videoSize) { isPortraitVideo(videoSize) }
+    val showPortraitFullscreenToggle = !isLandscape && !uiState.isFullscreen && isPortraitVideo
 
     // Dialog states
     var showSendDanmaku by remember { mutableStateOf(false) }
@@ -615,8 +617,10 @@ fun VideoPlayerScreen(
                     duration = duration,
                     isDanmakuVisible = uiState.isDanmakuVisible,
                     isFullscreen = true,
+                    usePortraitControls = !isLandscape,
+                    showPortraitFullscreenToggle = false,
                     onBack = {
-                        if (uiState.isFullscreen) {
+                        if (uiState.isFullscreen || isLandscape) {
                             viewModel.setFullscreen(false)
                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         } else {
@@ -640,6 +644,7 @@ fun VideoPlayerScreen(
                         viewModel.setFullscreen(false)
                         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                     },
+                    onTogglePortraitFullscreen = {},
                     onScreenshot = { showScreenshotDialog = true },
                     onSendDanmaku = { showSendDanmaku = true },
                     onDanmakuSettings = { showDanmakuSettings = !showDanmakuSettings },
@@ -794,6 +799,8 @@ fun VideoPlayerScreen(
                         duration = duration,
                         isDanmakuVisible = uiState.isDanmakuVisible,
                         isFullscreen = false,
+                        usePortraitControls = true,
+                        showPortraitFullscreenToggle = showPortraitFullscreenToggle,
                         onBack = ::navigateBackWithSnapshot,
                         onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
                         centerSeekPreviewMs = centerSeekPreviewMs,
@@ -811,6 +818,11 @@ fun VideoPlayerScreen(
                         onToggleFullscreen = {
                             viewModel.setFullscreen(true)
                             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        },
+                        onTogglePortraitFullscreen = {
+                            controlsVisible = true
+                            viewModel.setFullscreen(true)
+                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                         },
                         onScreenshot = { showScreenshotDialog = true },
                         onSendDanmaku = { showSendDanmaku = true },
@@ -1118,6 +1130,8 @@ private fun PlayerControlsOverlay(
     duration: Long,
     isDanmakuVisible: Boolean,
     isFullscreen: Boolean,
+    usePortraitControls: Boolean,
+    showPortraitFullscreenToggle: Boolean,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     centerSeekPreviewMs: Long,
@@ -1125,12 +1139,13 @@ private fun PlayerControlsOverlay(
     onSeekPreviewEnd: (Long) -> Unit,
     onToggleDanmaku: () -> Unit,
     onToggleFullscreen: () -> Unit,
+    onTogglePortraitFullscreen: () -> Unit,
     onScreenshot: () -> Unit,
     onSendDanmaku: () -> Unit = {},
     onDanmakuSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val isPortraitControls = !isFullscreen
+    val isPortraitControls = usePortraitControls
     val legacyOnSeek: (Long) -> Unit = onSeekPreviewEnd
     val currentClockText = rememberCurrentClockText()
 
@@ -1230,6 +1245,18 @@ private fun PlayerControlsOverlay(
                 }
             }
 
+            if (showPortraitFullscreenToggle) {
+                CompactControlButton(onClick = onTogglePortraitFullscreen) {
+                    Text(
+                        text = "竖",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
+
             CompactControlButton(onClick = onToggleFullscreen) {
                 Icon(
                     if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
@@ -1323,11 +1350,13 @@ private fun PlayerControlsOverlay(
 @Composable
 private fun CompactControlButton(
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(
-        modifier = Modifier
-            .size(32.dp)
+        modifier = modifier
+            .widthIn(min = 32.dp)
+            .height(32.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
         content = content
@@ -2655,6 +2684,16 @@ private fun applyVideoTransform(
         setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
     }
     textureView.setTransform(matrix)
+}
+
+private fun isPortraitVideo(videoSize: VideoSize): Boolean {
+    val videoWidth = videoSize.width
+    val videoHeight = videoSize.height
+    if (videoWidth <= 0 || videoHeight <= 0) return false
+
+    val pixelRatio = videoSize.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+    val displayAspectRatio = (videoWidth.toFloat() * pixelRatio) / videoHeight.toFloat()
+    return displayAspectRatio < 1f
 }
 
 private fun List<EpisodeUiItem>.nextEpisodeAfter(currentMediaId: String): EpisodeUiItem? {
