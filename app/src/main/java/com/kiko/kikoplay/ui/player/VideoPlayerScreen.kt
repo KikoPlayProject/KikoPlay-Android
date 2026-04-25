@@ -134,6 +134,9 @@ import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -1129,6 +1132,7 @@ private fun PlayerControlsOverlay(
 ) {
     val isPortraitControls = !isFullscreen
     val legacyOnSeek: (Long) -> Unit = onSeekPreviewEnd
+    val currentClockText = rememberCurrentClockText()
 
     Box(modifier = modifier) {
         TopBottomGradientOverlay()
@@ -1155,6 +1159,18 @@ private fun PlayerControlsOverlay(
             IconButton(onClick = onScreenshot, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.CameraAlt, "截图", tint = Color.White)
                 }
+        }
+
+        if (!isPortraitControls) {
+            Text(
+                text = currentClockText,
+                color = Color.White,
+                fontSize = 11.sp,
+                lineHeight = 11.sp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 2.dp)
+            )
         }
 
         // Bottom bar
@@ -2459,6 +2475,23 @@ private fun parseSecondsTextToMs(text: String, allowNegative: Boolean): Long? {
         .multiply(BigDecimal.valueOf(1000))
         .setScale(0, RoundingMode.HALF_UP)
         .longValueExact()
+}
+
+@Composable
+private fun rememberCurrentClockText(): String {
+    val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    var currentClockText by remember { mutableStateOf(formatter.format(Date())) }
+
+    LaunchedEffect(formatter) {
+        while (true) {
+            currentClockText = formatter.format(Date())
+            val now = System.currentTimeMillis()
+            val delayToNextMinute = 60_000L - (now % 60_000L)
+            delay(delayToNextMinute.coerceAtLeast(1L))
+        }
+    }
+
+    return currentClockText
 }
 
 private fun formatTime(ms: Long): String {
