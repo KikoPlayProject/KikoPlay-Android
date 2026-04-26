@@ -2378,12 +2378,26 @@ private fun EpisodeListItem(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (displayPlayTimeMs > 0L) {
-                    Text(
-                        text = formatEpisodeDuration(displayPlayTimeMs / 1000),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                if (displayPlayTimeMs > 0L || episode.isCached) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (displayPlayTimeMs > 0L) {
+                            Text(
+                                text = formatEpisodeDuration(displayPlayTimeMs / 1000),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (episode.isCached) {
+                            Text(
+                                text = "\u5df2\u7f13\u5b58",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 

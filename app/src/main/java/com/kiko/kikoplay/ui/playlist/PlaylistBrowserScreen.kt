@@ -51,6 +51,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,12 +62,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kiko.kikoplay.data.remote.model.PlaylistNode
 import com.kiko.kikoplay.ui.common.EmptyState
+import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.theme.MarkerBlue
 import com.kiko.kikoplay.ui.theme.MarkerGreen
 import com.kiko.kikoplay.ui.theme.MarkerOrange
 import com.kiko.kikoplay.ui.theme.MarkerPink
 import com.kiko.kikoplay.ui.theme.MarkerRed
 import com.kiko.kikoplay.ui.theme.MarkerYellow
+import kotlinx.coroutines.launch
 
 private const val LABEL_PLAYLIST = "\u64ad\u653e\u5217\u8868"
 private const val LABEL_BACK = "\u8fd4\u56de"
@@ -77,6 +80,7 @@ private const val LABEL_EMPTY_DIR = "\u8be5\u76ee\u5f55\u4e0b\u6ca1\u6709\u5185\
 private const val LABEL_LOAD_FAILED = "\u52a0\u8f7d\u5931\u8d25"
 private const val LABEL_CANCEL = "\u53d6\u6d88"
 private const val LABEL_CACHE = "\u7f13\u5b58"
+private const val LABEL_CACHED = "\u5df2\u7f13\u5b58"
 private const val LABEL_MARK_WATCHED = "\u6807\u8bb0\u5df2\u770b"
 private const val LABEL_SELECT_ALL = "\u5168\u9009"
 private const val LABEL_SELECTED_PREFIX = "\u5df2\u9009 "
@@ -86,21 +90,14 @@ private const val LABEL_SELECTED_SUFFIX = " \u9879"
 @Composable
 fun PlaylistBrowserScreen(
     onBack: () -> Unit,
-    onPlayMedia: (
-        mediaId: String,
-        title: String,
-        danmuPool: String?,
-        animeTitle: String?,
-        parentPath: List<Int>,
-        startPositionMs: Long,
-        initialPlayTimeState: Int
-    ) -> Unit,
+    onPlayMedia: (VideoPlayerRoute) -> Unit,
     viewModel: PlaylistBrowserViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilterMenu by remember { mutableStateOf(false) }
     val breadcrumbScrollState = rememberScrollState()
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
     fun saveCurrentScrollPosition() {
         viewModel.rememberCurrentScrollPosition(
@@ -253,6 +250,7 @@ fun PlaylistBrowserScreen(
                         itemsIndexed(uiState.currentItems) { index, node ->
                             PlaylistItemCard(
                                 node = node,
+                                isCached = node.mediaId != null && node.mediaId in uiState.cachedMediaIds,
                                 isSelected = uiState.selectedIndices.contains(index),
                                 isSelectionMode = uiState.isSelectionMode,
                                 onClick = {
@@ -263,18 +261,19 @@ fun PlaylistBrowserScreen(
                                         viewModel.navigateToFolder(index, node)
                                     } else {
                                         saveCurrentScrollPosition()
-                                        onPlayMedia(
-                                            node.mediaId ?: return@PlaylistItemCard,
-                                            node.text,
-                                            node.danmuPool,
-                                            node.animeName,
-                                            uiState.pathStack.map { it.index },
-                                            normalizeResumePositionMs(
-                                                playTimeSeconds = node.playTime,
-                                                playTimeState = node.playTimeState
-                                            ),
-                                            node.playTimeState ?: 0
-                                        )
+                                        coroutineScope.launch {
+                                            onPlayMedia(
+                                                viewModel.resolvePlaybackRouteForNode(
+                                                    node = node,
+                                                    parentPath = uiState.pathStack.map { it.index },
+                                                    startPositionMs = normalizeResumePositionMs(
+                                                        playTimeSeconds = node.playTime,
+                                                        playTimeState = node.playTimeState
+                                                    ),
+                                                    initialPlayTimeState = node.playTimeState ?: 0
+                                                )
+                                            )
+                                        }
                                     }
                                 },
                                 onLongClick = {
@@ -297,6 +296,7 @@ fun PlaylistBrowserScreen(
 @Composable
 private fun PlaylistItemCard(
     node: PlaylistNode,
+    isCached: Boolean,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
@@ -356,12 +356,26 @@ private fun PlaylistItemCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (!node.isFolder && node.playTime != null && node.playTime > 0) {
-                    Text(
-                        text = formatDuration(node.playTime.toLong()),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                if (!node.isFolder && (node.playTime != null && node.playTime > 0 || isCached)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (node.playTime != null && node.playTime > 0) {
+                            Text(
+                                text = formatDuration(node.playTime.toLong()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (isCached) {
+                            Text(
+                                text = LABEL_CACHED,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 

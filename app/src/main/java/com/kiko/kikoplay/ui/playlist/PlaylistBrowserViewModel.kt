@@ -2,18 +2,23 @@ package com.kiko.kikoplay.ui.playlist
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kiko.kikoplay.data.local.entity.CacheTaskEntity
 import com.kiko.kikoplay.data.remote.KikoPlayApi
 import com.kiko.kikoplay.data.remote.model.PlaylistNode
 import com.kiko.kikoplay.data.remote.model.UpdateTimeRequest
 import com.kiko.kikoplay.data.repository.CacheRepository
 import com.kiko.kikoplay.data.repository.ConnectionRepository
 import com.kiko.kikoplay.data.repository.PlaylistRepository
+import com.kiko.kikoplay.data.repository.SettingsRepository
+import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 enum class PlayStateFilter(val label: String) {
@@ -34,6 +39,7 @@ data class PlaylistUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val currentItems: List<PlaylistNode> = emptyList(),
+    val cachedMediaIds: Set<String> = emptySet(),
     val pathStack: List<BreadcrumbItem> = emptyList(),
     val scrollPosition: ListScrollPosition = ListScrollPosition(),
     val filter: PlayStateFilter = PlayStateFilter.ALL,
@@ -46,16 +52,23 @@ class PlaylistBrowserViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val connectionRepository: ConnectionRepository,
     private val cacheRepository: CacheRepository,
+    private val settingsRepository: SettingsRepository,
     private val api: KikoPlayApi
 ) : ViewModel() {
+    private companion object {
+        const val SOURCE_TYPE_PC = 0
+        const val SOURCE_TYPE_CACHE = 2
+    }
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
 
     private val scrollPositions = mutableMapOf<List<Int>, ListScrollPosition>()
+    private var completedCacheTasks: List<CacheTaskEntity> = emptyList()
 
     init {
         observePlaylistProgressUpdates()
+        observeCachedMediaIds()
         loadPlaylist()
     }
 
@@ -216,9 +229,10 @@ class PlaylistBrowserViewModel @Inject constructor(
     fun markSelectedWatched() {
         val state = _uiState.value
         viewModelScope.launch {
+            val shouldSyncPlayProgress = settingsRepository.syncPlayProgress.first()
             state.selectedIndices.forEach { index ->
                 val node = state.currentItems.getOrNull(index) ?: return@forEach
-                if (!node.isFolder && node.mediaId != null) {
+                if (shouldSyncPlayProgress && !node.isFolder && node.mediaId != null) {
                     try {
                         api.updatePlayTime(
                             UpdateTimeRequest(mediaId = node.mediaId, playTime = 0.0, playTimeState = 2)
@@ -232,11 +246,67 @@ class PlaylistBrowserViewModel @Inject constructor(
         }
     }
 
+    suspend fun resolvePlaybackRouteForNode(
+        node: PlaylistNode,
+        parentPath: List<Int>,
+        startPositionMs: Long,
+        initialPlayTimeState: Int
+    ): VideoPlayerRoute {
+        val mediaId = node.mediaId ?: error("Cannot resolve playback route for folder node")
+        val activeServerAddress = resolveActiveServerAddress()
+        val cacheTask = cacheRepository.getPlayableCache(mediaId, activeServerAddress)
+
+        return VideoPlayerRoute(
+            mediaId = mediaId,
+            title = node.text,
+            sourceType = if (cacheTask != null) SOURCE_TYPE_CACHE else SOURCE_TYPE_PC,
+            danmuPool = node.danmuPool,
+            animeTitle = node.animeName,
+            localPath = cacheTask?.localPath,
+            serverAddress = cacheTask?.serverAddress ?: activeServerAddress,
+            parentPath = parentPath,
+            startPositionMs = startPositionMs,
+            initialPlayTimeState = initialPlayTimeState
+        )
+    }
+
     private fun observePlaylistProgressUpdates() {
         viewModelScope.launch {
             playlistRepository.progressUpdates.collect {
                 refreshCurrentItemsFromCache()
             }
+        }
+    }
+
+    private fun observeCachedMediaIds() {
+        viewModelScope.launch {
+            cacheRepository.getCompletedTasks().collect { tasks ->
+                completedCacheTasks = tasks
+                refreshCachedMediaIds()
+            }
+        }
+        viewModelScope.launch {
+            connectionRepository.activeConnection.collect {
+                refreshCachedMediaIds()
+            }
+        }
+    }
+
+    private fun refreshCachedMediaIds() {
+        val activeServerAddress = connectionRepository.activeConnection.value?.let { "${it.host}:${it.port}" }
+        val cachedMediaIds = if (activeServerAddress == null) {
+            emptySet()
+        } else {
+            completedCacheTasks.asSequence()
+                .filter { task ->
+                    task.serverAddress == activeServerAddress &&
+                        task.localPath?.let { File(it).exists() } == true
+                }
+                .map { it.mediaId }
+                .toSet()
+        }
+        _uiState.update { state ->
+            if (state.cachedMediaIds == cachedMediaIds) state else state.copy(cachedMediaIds = cachedMediaIds)
         }
     }
 
@@ -256,6 +326,10 @@ class PlaylistBrowserViewModel @Inject constructor(
                 selectedIndices = it.selectedIndices.filter { index -> index in refreshedItems.indices }.toSet()
             )
         }
+    }
+
+    private fun resolveActiveServerAddress(): String? {
+        return connectionRepository.activeConnection.value?.let { "${it.host}:${it.port}" }
     }
 
     private fun currentPathIndices(

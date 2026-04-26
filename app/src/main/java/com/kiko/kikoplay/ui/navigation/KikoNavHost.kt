@@ -104,19 +104,7 @@ fun KikoNavHost(
         composable<PlaylistBrowserRoute> {
             PlaylistBrowserScreen(
                 onBack = { navController.popBackStack() },
-                onPlayMedia = { mediaId, title, danmuPool, animeTitle, parentPath, startPositionMs, initialPlayTimeState ->
-                    navController.navigate(
-                        VideoPlayerRoute(
-                            mediaId = mediaId,
-                            title = title,
-                            danmuPool = danmuPool,
-                            animeTitle = animeTitle,
-                            parentPath = parentPath,
-                            startPositionMs = startPositionMs,
-                            initialPlayTimeState = initialPlayTimeState
-                        )
-                    )
-                }
+                onPlayMedia = { targetRoute -> navController.navigate(targetRoute) }
             )
         }
 

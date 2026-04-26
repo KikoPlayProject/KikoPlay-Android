@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.kiko.kikoplay.data.model.PlayerPreferences
+import com.kiko.kikoplay.data.local.entity.CacheTaskEntity
 import com.kiko.kikoplay.data.local.model.CachedDanmakuPayload
 import com.kiko.kikoplay.data.remote.ConnectionManager
 import com.kiko.kikoplay.data.remote.KikoPlayApi
@@ -41,6 +42,7 @@ data class EpisodeUiItem(
     val title: String,
     val danmuPool: String?,
     val animeTitle: String?,
+    val isCached: Boolean,
     val playTimeState: Int?,
     val playTimeSeconds: Double?,
     val startPositionMs: Long
@@ -95,6 +97,8 @@ class VideoPlayerViewModel @Inject constructor(
     private val route = savedStateHandle.toRoute<VideoPlayerRoute>()
     val parentPath: List<Int> get() = uiState.value.parentPath
     private var fullDanmakuComments: List<FullDanmakuComment> = emptyList()
+    private var episodeNodes: List<com.kiko.kikoplay.data.remote.model.PlaylistNode> = emptyList()
+    private var completedCacheTasks: List<CacheTaskEntity> = emptyList()
 
     private val _uiState = MutableStateFlow(
         PlayerUiState(
@@ -118,6 +122,7 @@ class VideoPlayerViewModel @Inject constructor(
 
     init {
         observeSettings()
+        observeCompletedCacheTasks()
         loadEpisodes()
         loadSubtitle()
         loadDanmaku()
@@ -181,7 +186,8 @@ class VideoPlayerViewModel @Inject constructor(
                 }
             }
 
-            val episodes = mapEpisodes(nodes.orEmpty())
+            episodeNodes = nodes.orEmpty()
+            val episodes = mapEpisodes(episodeNodes)
             _uiState.update {
                 it.copy(
                     parentPath = resolvedPath,
@@ -192,6 +198,7 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     private fun mapEpisodes(nodes: List<com.kiko.kikoplay.data.remote.model.PlaylistNode>): List<EpisodeUiItem> {
+        val cachedMediaIds = resolveCachedEpisodeMediaIds()
         return nodes
             .asSequence()
             .filterNot { it.isFolder }
@@ -202,6 +209,7 @@ class VideoPlayerViewModel @Inject constructor(
                     title = node.text,
                     danmuPool = node.danmuPool,
                     animeTitle = node.animeName,
+                    isCached = mediaId in cachedMediaIds,
                     playTimeState = node.playTimeState,
                     playTimeSeconds = node.playTime,
                     startPositionMs = normalizeResumePositionMs(
@@ -211,6 +219,39 @@ class VideoPlayerViewModel @Inject constructor(
                 )
             }
             .toList()
+    }
+
+    private fun observeCompletedCacheTasks() {
+        viewModelScope.launch {
+            cacheRepository.getCompletedTasks().collect { tasks ->
+                completedCacheTasks = tasks
+                refreshEpisodesFromCacheState()
+            }
+        }
+        viewModelScope.launch {
+            connectionManager.connection.collect {
+                refreshEpisodesFromCacheState()
+            }
+        }
+    }
+
+    private fun refreshEpisodesFromCacheState() {
+        if (episodeNodes.isEmpty()) return
+        val updatedEpisodes = mapEpisodes(episodeNodes)
+        _uiState.update { state ->
+            if (state.episodes == updatedEpisodes) state else state.copy(episodes = updatedEpisodes)
+        }
+    }
+
+    private fun resolveCachedEpisodeMediaIds(): Set<String> {
+        val serverAddress = resolveEpisodeServerAddress() ?: return emptySet()
+        return completedCacheTasks.asSequence()
+            .filter { task ->
+                task.serverAddress == serverAddress &&
+                    task.localPath?.let { File(it).exists() } == true
+            }
+            .map { it.mediaId }
+            .toSet()
     }
 
     private fun loadSubtitle() {
