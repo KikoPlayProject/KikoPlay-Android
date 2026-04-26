@@ -20,23 +20,48 @@ data class DiscoveredDevice(
     val deviceName: String? = null
 )
 
+data class LocalIpv4Network(
+    val address: String,
+    val prefixLength: Int
+)
+
 object NetworkScanner {
 
     private val commonPorts = listOf(8000, 8080, 8888, 9000, 9090)
 
-    fun getLocalIpAddress(): String? {
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
-            for (intf in interfaces) {
-                if (intf.isLoopback || !intf.isUp) continue
-                for (addr in intf.inetAddresses) {
-                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                        return addr.hostAddress
+    fun getLocalIpv4Networks(): List<LocalIpv4Network> {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()
+            buildList {
+                for (networkInterface in interfaces) {
+                    if (!networkInterface.isUp || networkInterface.isLoopback) continue
+                    for (interfaceAddress in networkInterface.interfaceAddresses) {
+                        val address = interfaceAddress.address as? Inet4Address ?: continue
+                        if (address.isLoopbackAddress || address.isLinkLocalAddress) continue
+                        add(
+                            LocalIpv4Network(
+                                address = address.hostAddress ?: continue,
+                                prefixLength = interfaceAddress.networkPrefixLength.toInt().coerceIn(0, 32)
+                            )
+                        )
                     }
                 }
-            }
-        } catch (_: Exception) {}
-        return null
+            }.distinct()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun getLocalIpAddress(): String? {
+        return getLocalIpv4Networks().firstOrNull()?.address
+    }
+
+    fun isInSameSubnet(host: String, localNetwork: LocalIpv4Network): Boolean {
+        val hostValue = ipv4ToLong(host) ?: return false
+        val localValue = ipv4ToLong(localNetwork.address) ?: return false
+        val prefixLength = localNetwork.prefixLength.coerceIn(0, 32)
+        val mask = if (prefixLength == 0) 0L else (-1L shl (32 - prefixLength)) and 0xFFFF_FFFFL
+        return (hostValue and mask) == (localValue and mask)
     }
 
     fun scan(port: Int? = null): Flow<DiscoveredDevice> = flow {
@@ -46,15 +71,20 @@ object NetworkScanner {
         val semaphore = Semaphore(30)
 
         val results = coroutineScope {
-            (1..254).flatMap { i ->
-                val ip = "$subnet.$i"
-                if (ip == localIp) emptyList()
-                else portsToScan.map { p ->
-                    async {
-                        semaphore.withPermit {
-                            if (isPortOpen(ip, p, 300)) {
-                                DiscoveredDevice(host = ip, port = p)
-                            } else null
+            (1..254).flatMap { index ->
+                val ip = "$subnet.$index"
+                if (ip == localIp) {
+                    emptyList()
+                } else {
+                    portsToScan.map { targetPort ->
+                        async {
+                            semaphore.withPermit {
+                                if (isPortOpen(ip, targetPort, 300)) {
+                                    DiscoveredDevice(host = ip, port = targetPort)
+                                } else {
+                                    null
+                                }
+                            }
                         }
                     }
                 }
@@ -75,5 +105,18 @@ object NetworkScanner {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun ipv4ToLong(ip: String): Long? {
+        val parts = ip.split('.')
+        if (parts.size != 4) return null
+
+        var value = 0L
+        for (part in parts) {
+            val octet = part.toIntOrNull() ?: return null
+            if (octet !in 0..255) return null
+            value = (value shl 8) or octet.toLong()
+        }
+        return value
     }
 }

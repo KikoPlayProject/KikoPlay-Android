@@ -112,6 +112,9 @@ dependencies {
     // Danmaku
     implementation(libs.danmaku)
 
+    // QR scan
+    implementation(libs.zxing.android.embedded)
+
     // Test
     testImplementation(libs.junit)
     if (enableAndroidTests.get()) {

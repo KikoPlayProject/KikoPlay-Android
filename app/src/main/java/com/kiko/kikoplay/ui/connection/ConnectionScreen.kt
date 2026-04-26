@@ -1,5 +1,9 @@
 package com.kiko.kikoplay.ui.connection
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -25,6 +29,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -46,13 +51,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.zxing.client.android.Intents
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.kiko.kikoplay.data.local.entity.ConnectionEntity
 import com.kiko.kikoplay.data.remote.ConnectionInfo
 import com.kiko.kikoplay.util.DiscoveredDevice
@@ -68,6 +81,33 @@ fun ConnectionScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.connectionHistory.collectAsStateWithLifecycle()
     val activeConnection by viewModel.activeConnection.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val qrScanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val content = result.contents
+        if (!content.isNullOrBlank()) {
+            viewModel.connectFromQrContent(content)
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (granted) {
+            qrScanLauncher.launch(buildQrScanOptions())
+        } else {
+            viewModel.showConnectionError("需要相机权限才能扫描二维码")
+        }
+    }
 
     DisposableEffect(Unit) {
         viewModel.startScan()
@@ -108,18 +148,29 @@ fun ConnectionScreen(
                 }
             }
 
-            // Auto scan section
             item {
                 ScanSection(
                     isScanning = uiState.isScanning,
                     devices = uiState.discoveredDevices,
                     isConnecting = uiState.isConnecting,
                     onDeviceClick = { viewModel.connect(it.host, it.port) },
-                    onRescan = { viewModel.startScan() }
+                    onRescan = viewModel::startScan
                 )
             }
 
-            // Manual connection section
+            item {
+                QrConnectionSection(
+                    isConnecting = uiState.isConnecting,
+                    onScanClick = {
+                        if (hasCameraPermission) {
+                            qrScanLauncher.launch(buildQrScanOptions())
+                        } else {
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    }
+                )
+            }
+
             item {
                 ManualConnectionSection(
                     host = uiState.manualHost,
@@ -132,7 +183,6 @@ fun ConnectionScreen(
                 )
             }
 
-            // History section
             if (history.isNotEmpty()) {
                 item {
                     Row(
@@ -237,20 +287,32 @@ private fun ScanSection(
             if (isScanning) {
                 val transition = rememberInfiniteTransition(label = "scan")
                 val rotation by transition.animateFloat(
-                    initialValue = 0f, targetValue = 360f,
-                    animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(2000, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
                     label = "rotation"
                 )
                 Icon(
                     Icons.Default.Radar,
                     contentDescription = "扫描中",
-                    modifier = Modifier.size(16.dp).rotate(rotation),
+                    modifier = Modifier
+                        .size(16.dp)
+                        .rotate(rotation),
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.width(4.dp))
-                Text("扫描中...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "扫描中...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             } else {
-                TextButton(onClick = onRescan) { Text("重新扫描") }
+                TextButton(onClick = onRescan) {
+                    Text("重新扫描")
+                }
             }
         }
 
@@ -267,26 +329,78 @@ private fun ScanSection(
         devices.forEach { device ->
             Card(
                 onClick = { if (!isConnecting) onDeviceClick(device) },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        Icons.Default.Computer,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(device.deviceName ?: "KikoPlay", style = MaterialTheme.typography.bodyLarge)
-                        Text("${device.host}:${device.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "${device.host}:${device.port}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     if (isConnecting) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
                     } else {
-                        Icon(Icons.Default.Wifi, contentDescription = "连接", tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.Default.Wifi,
+                            contentDescription = "连接",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QrConnectionSection(
+    isConnecting: Boolean,
+    onScanClick: () -> Unit
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.QrCodeScanner,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("扫描二维码连接", style = MaterialTheme.typography.titleMedium)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "扫描 PC 端生成的二维码。二维码可包含多个服务地址，应用会优先选择与手机处于同一局域网的地址连接；若未命中，则依次尝试全部地址。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onScanClick,
+            enabled = !isConnecting,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("扫描二维码")
         }
     }
 }
@@ -303,7 +417,12 @@ private fun ManualConnectionSection(
 ) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Icon(
+                Icons.Default.Wifi,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
             Spacer(Modifier.width(8.dp))
             Text("手动连接", style = MaterialTheme.typography.titleMedium)
         }
@@ -333,7 +452,12 @@ private fun ManualConnectionSection(
             )
         }
         if (error != null) {
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+            Text(
+                error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
         Spacer(Modifier.height(8.dp))
         Button(
@@ -342,7 +466,11 @@ private fun ManualConnectionSection(
             modifier = Modifier.fillMaxWidth()
         ) {
             if (isConnecting) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
                 Spacer(Modifier.width(8.dp))
             }
             Text(if (isConnecting) "连接中..." else "连接")
@@ -366,15 +494,37 @@ private fun HistoryItem(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(
+                Icons.Default.Computer,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(entity.deviceName ?: "KikoPlay", style = MaterialTheme.typography.bodyLarge)
-                Text("${entity.host}:${entity.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "${entity.host}:${entity.port}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "删除",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
+    }
+}
+
+private fun buildQrScanOptions(): ScanOptions {
+    return ScanOptions().apply {
+        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+        setPrompt("扫描 KikoPlay 服务二维码")
+        setBeepEnabled(false)
+        setOrientationLocked(true)
+        addExtra(Intents.Scan.MISSING_CAMERA_PERMISSION, true)
     }
 }

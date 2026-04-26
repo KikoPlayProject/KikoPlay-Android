@@ -7,6 +7,8 @@ import com.kiko.kikoplay.data.remote.ConnectionInfo
 import com.kiko.kikoplay.data.repository.ConnectionRepository
 import com.kiko.kikoplay.util.DiscoveredDevice
 import com.kiko.kikoplay.util.NetworkScanner
+import com.kiko.kikoplay.util.QrConnectionParser
+import com.kiko.kikoplay.util.ServiceAddress
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -40,7 +42,9 @@ class ConnectionViewModel @Inject constructor(
 
     val connectionHistory: StateFlow<List<ConnectionEntity>> =
         connectionRepository.connectionHistory.stateIn(
-            viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
         )
 
     val activeConnection: StateFlow<ConnectionInfo?> = connectionRepository.activeConnection
@@ -54,16 +58,19 @@ class ConnectionViewModel @Inject constructor(
         scanJob?.cancel()
         _uiState.update { it.copy(isScanning = true, discoveredDevices = emptyList()) }
         scanJob = viewModelScope.launch {
-            NetworkScanner.scan().collect { device ->
-                _uiState.update { state ->
-                    val devices = state.discoveredDevices.toMutableList()
-                    if (devices.none { it.host == device.host && it.port == device.port }) {
-                        devices.add(device)
+            try {
+                NetworkScanner.scan().collect { device ->
+                    _uiState.update { state ->
+                        val devices = state.discoveredDevices.toMutableList()
+                        if (devices.none { it.host == device.host && it.port == device.port }) {
+                            devices.add(device)
+                        }
+                        state.copy(discoveredDevices = devices)
                     }
-                    state.copy(discoveredDevices = devices)
                 }
+            } finally {
+                _uiState.update { it.copy(isScanning = false) }
             }
-            _uiState.update { it.copy(isScanning = false) }
         }
     }
 
@@ -82,14 +89,7 @@ class ConnectionViewModel @Inject constructor(
 
     fun connect(host: String, port: Int, deviceName: String? = null) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isConnecting = true, connectionError = null) }
-            val result = connectionRepository.connect(host, port, deviceName)
-            _uiState.update {
-                it.copy(
-                    isConnecting = false,
-                    connectionError = result.exceptionOrNull()?.message
-                )
-            }
+            val result = performConnect(host, port, deviceName)
             if (result.isSuccess) {
                 _navigateToPlaylistEvents.emit(Unit)
             }
@@ -106,6 +106,22 @@ class ConnectionViewModel @Inject constructor(
         connect(host, port)
     }
 
+    fun connectFromQrContent(content: String) {
+        viewModelScope.launch {
+            val addresses = QrConnectionParser.parseServiceAddresses(content)
+            if (addresses.isEmpty()) {
+                _uiState.update { it.copy(connectionError = "二维码中没有可用的 KikoPlay 服务地址") }
+                return@launch
+            }
+
+            val orderedAddresses = QrConnectionParser.prioritizeForCurrentLan(addresses)
+            val result = connectSequentially(orderedAddresses)
+            if (result.isSuccess) {
+                _navigateToPlaylistEvents.emit(Unit)
+            }
+        }
+    }
+
     fun connectFromHistory(entity: ConnectionEntity) {
         connect(entity.host, entity.port, entity.deviceName)
     }
@@ -118,5 +134,43 @@ class ConnectionViewModel @Inject constructor(
 
     fun disconnect() {
         connectionRepository.disconnect()
+    }
+
+    fun showConnectionError(message: String) {
+        _uiState.update { it.copy(connectionError = message) }
+    }
+
+    private suspend fun connectSequentially(addresses: List<ServiceAddress>): Result<Unit> {
+        var lastError: Throwable? = null
+        for (address in addresses) {
+            val result = performConnect(address.host, address.port)
+            if (result.isSuccess) {
+                return Result.success(Unit)
+            }
+            lastError = result.exceptionOrNull()
+        }
+
+        val fallbackMessage = if (addresses.size == 1) {
+            "连接失败"
+        } else {
+            "已尝试二维码中的全部地址，仍然连接失败"
+        }
+        return Result.failure(lastError ?: IllegalStateException(fallbackMessage))
+    }
+
+    private suspend fun performConnect(
+        host: String,
+        port: Int,
+        deviceName: String? = null
+    ): Result<Unit> {
+        _uiState.update { it.copy(isConnecting = true, connectionError = null) }
+        val result = connectionRepository.connect(host, port, deviceName)
+        _uiState.update {
+            it.copy(
+                isConnecting = false,
+                connectionError = result.exceptionOrNull()?.message
+            )
+        }
+        return result
     }
 }

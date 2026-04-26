@@ -21,6 +21,7 @@ danmaku = "0.9.25"
 junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
+zxingEmbedded = "4.3.0"
 
 [libraries]
 # Core
@@ -86,6 +87,7 @@ danmaku = { group = "com.github.bilibili", name = "DanmakuFlameMaster", version.
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingEmbedded" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

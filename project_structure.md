@@ -6,7 +6,7 @@ KikoPlay Android 是 KikoPlay PC 的局域网配套播放器客户端。
 
 当前版本基于 Kotlin + Jetpack Compose + AGP 9.1 开发，主要能力包括：
 
-- 连接局域网内的 KikoPlay PC 服务
+- 通过自动扫描、手动输入、历史记录与二维码扫描连接局域网内的 KikoPlay PC 服务；二维码可包含多个服务地址，客户端会优先选择与当前设备处于同一局域网的地址进行连接，未命中时再依次尝试全部地址
 - 浏览 PC 播放列表并发起播放，支持目录面包屑、分级返回、目录滚动位置恢复、同目录剧集联动与本地进度同步；当条目已有当前连接对应的完整缓存时，会优先使用本地缓存进入播放器
 - 本地视频扫描与播放
 - 弹幕加载、增量刷新、来源信息查看与同步调整、发送与基础设置
@@ -31,6 +31,7 @@ KikoPlay Android 是 KikoPlay PC 的局域网配套播放器客户端。
 | 图片加载 | Coil 3 | 3.1.0 |
 | 偏好存储 | DataStore Preferences | 1.1.4 |
 | 后台任务 | WorkManager | 2.10.1 |
+| 二维码扫描 | zxing-android-embedded | 4.3.0 |
 
 ## 构建说明
 
@@ -257,7 +258,8 @@ com.kiko.kikoplay/
 └── util/
     ├── CacheFileHelper.kt
     ├── MediaUrlBuilder.kt
-    └── NetworkScanner.kt
+    ├── NetworkScanner.kt
+    └── QrConnectionParser.kt
 ```
 
 ## 主要模块说明
@@ -283,7 +285,7 @@ com.kiko.kikoplay/
 ### UI 层
 
 - `ui/home`: 首页与观看历史入口，首页最近观看使用纵向缩略图列表展示，包含最近观看去重、缓存标记、进度条与恢复播放；当最近观看条目已缓存时，会优先使用本地缓存进入播放器，同时尽量保留对应 PC 同目录剧集上下文
-- `ui/connection`: 局域网连接管理
+- `ui/connection`: 局域网连接管理，支持自动扫描、手动输入、历史记录与二维码扫描连接；二维码内容可包含多条 `http://ipv4:port/` 或兼容 `http://ipv4/:port` 形式的服务地址，客户端会优先尝试与当前设备位于同一局域网的地址
 - `ui/playlist`: PC 播放列表浏览，支持 breadcrumb 自动滚动、系统返回逐级回退、按目录恢复列表滚动位置、从播放页返回后保留进入前列表位置、本地播放进度联动；已完成缓存的条目会在列表中显示“已缓存”标记，点击时会优先使用当前连接对应的本地缓存进入播放器；顶部左上角返回按钮直接返回上一个页面，目录级跳转由系统返回与 breadcrumb 负责，批量“标记已看”会跟随“同步播放进度”设置决定是否向 PC 端发送 `updateTime`
 - `ui/player`: 播放器、同目录剧集列表、进入播放页后剧集列表自动定位当前播放项、剧集长按多选缓存、续播进度同步、自动下一集、纵向布局下支持“剧集 / 弹幕”分页与左右滑动切换、弹幕来源卡片展示与编辑、弹幕增量刷新、延迟与时间轴同步调整，以及弹幕与截图片段交互；已完成缓存的剧集会在列表中显示“已缓存”标记，当当前或目标剧集存在本地可播放缓存时，剧集切换与自动下一集会优先使用缓存播放，否则继续走 PC 串流。支持沉浸式全屏、顶部/底部渐变控制层、横向手势精细 seek、左侧亮度调节、右侧音量调节、下半区域长按 1 秒临时 2 倍速并带轻震动反馈与中心提示，横屏时会在顶部中央显示当前时间，并会在竖屏下为竖版视频提供独立的竖版全屏入口，弹幕显示开关、显示区域、不透明度、字体大小、弹幕速度、类型屏蔽与播放速度会持久化恢复，同时“同步播放进度”设置会实际控制是否向 PC 端回传进度；弹幕渲染保留 DanmakuFlameMaster 绘制缓存并仅在实际 seek 时校准时间，对 `/api/danmu/full/` 返回的来源时间轴与延迟进行本地换算，使用自定义滑杆组件并按原视频比例渲染画面，同时会在退出播放器或自动切到下一集前保存当前帧历史缩略图，并在低内存设备上启用更保守的缓冲、seek 与抓图兜底
 - `ui/local`: 本地视频列表
@@ -299,14 +301,18 @@ com.kiko.kikoplay/
 ### 工具类
 
 - `CacheFileHelper.kt`: 统一生成缓存媒体对应的弹幕 sidecar 文件路径
-- `NetworkScanner.kt`: 局域网扫描
+- `NetworkScanner.kt`: 局域网扫描与本机 IPv4 网段识别
 - `MediaUrlBuilder.kt`: 构建媒体与字幕地址
+- `QrConnectionParser.kt`: 解析二维码中的服务地址列表，并按当前局域网优先级排序
 
 ## 测试目录
 
 ```text
 app/src/test/
-└── java/com/kiko/kikoplay/ExampleUnitTest.kt
+└── java/com/kiko/kikoplay/
+    ├── ExampleUnitTest.kt
+    └── util/
+        └── QrConnectionParserTest.kt
 
 app/src/androidTest/
 └── java/com/kiko/kikoplay/ExampleInstrumentedTest.kt
@@ -314,7 +320,8 @@ app/src/androidTest/
 
 说明：
 
-- 当前两个测试文件仍是模板级示例
+- `QrConnectionParserTest.kt` 覆盖二维码地址解析与“同局域网优先”排序逻辑
+- 其余两个测试文件仍是模板级示例
 - `androidTest` 目录保留，但默认不参与构建解析
 
 ## KikoPlay LAN API 对接情况
