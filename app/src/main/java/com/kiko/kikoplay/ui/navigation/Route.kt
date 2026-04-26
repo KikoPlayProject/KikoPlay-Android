@@ -9,7 +9,14 @@ object HomeRoute
 object LocalVideosRoute
 
 @Serializable
-object CacheManagementRoute
+data class CacheManagementRoute(
+    val initialTab: Int = TAB_ACTIVE
+) {
+    companion object {
+        const val TAB_ACTIVE = 0
+        const val TAB_COMPLETED = 1
+    }
+}
 
 @Serializable
 object SettingsRoute
@@ -28,6 +35,7 @@ data class VideoPlayerRoute(
     val danmuPool: String? = null,
     val animeTitle: String? = null,
     val localPath: String? = null,
+    val serverAddress: String? = null,
     val parentPath: List<Int> = emptyList(),
     val startPositionMs: Long = 0L,
     val initialPlayTimeState: Int = 0

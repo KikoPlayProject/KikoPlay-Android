@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.toRoute
 import com.kiko.kikoplay.ui.cache.CacheScreen
 import com.kiko.kikoplay.ui.connection.ConnectionScreen
 import com.kiko.kikoplay.ui.home.HomeScreen
@@ -37,6 +38,7 @@ fun KikoNavHost(
                             danmuPool = target.danmuPool,
                             animeTitle = target.animeTitle,
                             localPath = target.localPath,
+                            serverAddress = target.serverAddress,
                             startPositionMs = target.startPositionMs,
                             initialPlayTimeState = target.initialPlayTimeState
                         )
@@ -63,9 +65,11 @@ fun KikoNavHost(
             )
         }
 
-        composable<CacheManagementRoute> {
+        composable<CacheManagementRoute> { backStackEntry ->
+            val route = backStackEntry.toRoute<CacheManagementRoute>()
             CacheScreen(
-                onNavigateToPlayer = { mediaId, title, danmuPool, localPath ->
+                initialTab = route.initialTab,
+                onNavigateToPlayer = { mediaId, title, danmuPool, localPath, serverAddress ->
                     navController.navigate(
                         VideoPlayerRoute(
                             mediaId = mediaId,
@@ -73,6 +77,7 @@ fun KikoNavHost(
                             sourceType = 2,
                             danmuPool = danmuPool,
                             localPath = localPath,
+                            serverAddress = serverAddress,
                             startPositionMs = 0L,
                             initialPlayTimeState = 0
                         )
@@ -118,19 +123,9 @@ fun KikoNavHost(
         composable<VideoPlayerRoute> {
             VideoPlayerScreen(
                 onBack = { navController.popBackStack() },
-                onPlayMedia = { mediaId, title, danmuPool, animeTitle, parentPath, startPositionMs, initialPlayTimeState ->
+                onPlayMedia = { targetRoute ->
                     navController.popBackStack()
-                    navController.navigate(
-                        VideoPlayerRoute(
-                            mediaId = mediaId,
-                            title = title,
-                            danmuPool = danmuPool,
-                            animeTitle = animeTitle,
-                            parentPath = parentPath,
-                            startPositionMs = startPositionMs,
-                            initialPlayTimeState = initialPlayTimeState
-                        )
-                    )
+                    navController.navigate(targetRoute)
                 }
             )
         }
@@ -147,6 +142,7 @@ fun KikoNavHost(
                             danmuPool = target.danmuPool,
                             animeTitle = target.animeTitle,
                             localPath = target.localPath,
+                            serverAddress = target.serverAddress,
                             startPositionMs = target.startPositionMs,
                             initialPlayTimeState = target.initialPlayTimeState
                         )

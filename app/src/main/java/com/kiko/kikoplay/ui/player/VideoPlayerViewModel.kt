@@ -86,6 +86,12 @@ class VideoPlayerViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val json: Json
 ) : ViewModel() {
+    private companion object {
+        const val SOURCE_TYPE_PC = 0
+        const val SOURCE_TYPE_LOCAL = 1
+        const val SOURCE_TYPE_CACHE = 2
+    }
+
     private val route = savedStateHandle.toRoute<VideoPlayerRoute>()
     val parentPath: List<Int> get() = uiState.value.parentPath
     private var fullDanmakuComments: List<FullDanmakuComment> = emptyList()
@@ -136,22 +142,42 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     private fun loadEpisodes() {
-        if (route.sourceType != 0) return
+        if (route.sourceType == SOURCE_TYPE_LOCAL) return
         viewModelScope.launch {
             val initialPath = uiState.value.parentPath
             var resolvedPath = initialPath
 
-            var nodes = playlistRepository.getNodeAtPath(resolvedPath)
-            if (nodes == null || (resolvedPath.isEmpty() && nodes.none { it.mediaId == route.mediaId || it.nodes != null })) {
+            fun resolveEpisodeNodes(path: List<Int>): Pair<List<Int>, List<com.kiko.kikoplay.data.remote.model.PlaylistNode>?> {
+                var currentPath = path
+                var nodes = playlistRepository.getNodeAtPath(currentPath)
+                if (nodes == null || (currentPath.isEmpty() && nodes.none { it.mediaId == route.mediaId || it.nodes != null })) {
+                    currentPath = playlistRepository.findParentPathByMediaId(route.mediaId) ?: path
+                    nodes = playlistRepository.getNodeAtPath(currentPath)
+                } else if (currentPath.isEmpty()) {
+                    val inferredPath = playlistRepository.findParentPathByMediaId(route.mediaId)
+                    if (inferredPath != null) {
+                        currentPath = inferredPath
+                        nodes = playlistRepository.getNodeAtPath(currentPath)
+                    }
+                }
+                return currentPath to nodes
+            }
+
+            if (route.sourceType == SOURCE_TYPE_PC && playlistRepository.getCachedPlaylist() == null) {
                 val playlistResult = playlistRepository.ensurePlaylistLoaded()
                 if (playlistResult.isFailure) return@launch
-                resolvedPath = playlistRepository.findParentPathByMediaId(route.mediaId) ?: initialPath
-                nodes = playlistRepository.getNodeAtPath(resolvedPath)
-            } else if (resolvedPath.isEmpty()) {
-                val inferredPath = playlistRepository.findParentPathByMediaId(route.mediaId)
-                if (inferredPath != null) {
-                    resolvedPath = inferredPath
-                    nodes = playlistRepository.getNodeAtPath(resolvedPath)
+            }
+
+            var resolved = resolveEpisodeNodes(resolvedPath)
+            resolvedPath = resolved.first
+            var nodes = resolved.second
+
+            if ((nodes == null || nodes.none { it.mediaId == route.mediaId }) && shouldRefreshPlaylistForEpisodeContext()) {
+                val playlistResult = playlistRepository.fetchPlaylist()
+                if (playlistResult.isSuccess || playlistRepository.getCachedPlaylist() != null) {
+                    resolved = resolveEpisodeNodes(initialPath)
+                    resolvedPath = resolved.first
+                    nodes = resolved.second
                 }
             }
 
@@ -252,6 +278,24 @@ class VideoPlayerViewModel @Inject constructor(
         }
     }
 
+    private fun shouldRefreshPlaylistForEpisodeContext(): Boolean {
+        if (route.sourceType == SOURCE_TYPE_PC) return true
+        if (route.sourceType != SOURCE_TYPE_CACHE) return false
+
+        val targetServerAddress = route.serverAddress?.takeIf { it.isNotBlank() } ?: return false
+        val activeServerAddress = connectionManager.connection.value?.let { "${it.host}:${it.port}" }
+        return activeServerAddress == targetServerAddress
+    }
+
+    private fun resolveEpisodeServerAddress(): String? {
+        val activeServerAddress = connectionManager.connection.value?.let { "${it.host}:${it.port}" }
+        return when (route.sourceType) {
+            SOURCE_TYPE_CACHE -> route.serverAddress ?: activeServerAddress
+            SOURCE_TYPE_LOCAL -> null
+            else -> activeServerAddress ?: route.serverAddress
+        }
+    }
+
     private fun loadCachedDanmaku(): CachedDanmakuState? {
         if (route.sourceType != 2) return null
 
@@ -341,6 +385,24 @@ class VideoPlayerViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    suspend fun resolvePlaybackRouteForEpisode(episode: EpisodeUiItem): VideoPlayerRoute {
+        val serverAddress = resolveEpisodeServerAddress()
+        val cacheTask = cacheRepository.getPlayableCache(episode.mediaId, serverAddress)
+
+        return VideoPlayerRoute(
+            mediaId = episode.mediaId,
+            title = episode.title,
+            sourceType = if (cacheTask != null) SOURCE_TYPE_CACHE else SOURCE_TYPE_PC,
+            danmuPool = episode.danmuPool,
+            animeTitle = episode.animeTitle,
+            localPath = cacheTask?.localPath,
+            serverAddress = cacheTask?.serverAddress ?: serverAddress,
+            parentPath = uiState.value.parentPath,
+            startPositionMs = episode.startPositionMs,
+            initialPlayTimeState = episode.playTimeState ?: 0
+        )
     }
 
     fun toggleDanmaku() {

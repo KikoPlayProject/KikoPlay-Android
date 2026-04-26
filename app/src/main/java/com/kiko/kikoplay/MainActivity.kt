@@ -24,6 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kiko.kikoplay.data.repository.CacheRepository
 import com.kiko.kikoplay.data.repository.ConnectionRepository
 import com.kiko.kikoplay.data.repository.SettingsRepository
+import com.kiko.kikoplay.ui.navigation.CacheManagementRoute
 import com.kiko.kikoplay.ui.navigation.KikoBottomBar
 import com.kiko.kikoplay.ui.navigation.KikoNavHost
 import com.kiko.kikoplay.ui.navigation.TopLevelDestination
@@ -89,6 +90,9 @@ class MainActivity : ComponentActivity() {
                 val activeCacheTasks by cacheRepository
                     .getActiveTasks()
                     .collectAsStateWithLifecycle(initialValue = emptyList())
+                val completedCacheTasks by cacheRepository
+                    .getCompletedTasks()
+                    .collectAsStateWithLifecycle(initialValue = emptyList())
                 val isPlayerRoute = currentDestination?.hasRoute(VideoPlayerRoute::class) == true
 
                 // Hide bottom bar on secondary pages
@@ -105,12 +109,24 @@ class MainActivity : ComponentActivity() {
                                 currentDestination = currentDestination,
                                 activeCacheCount = activeCacheTasks.size,
                                 onNavigate = { route ->
-                                    navController.navigate(route) {
+                                    val targetRoute = when (route) {
+                                        is CacheManagementRoute -> {
+                                            val initialTab = when {
+                                                activeCacheTasks.isNotEmpty() -> CacheManagementRoute.TAB_ACTIVE
+                                                completedCacheTasks.isNotEmpty() -> CacheManagementRoute.TAB_COMPLETED
+                                                else -> CacheManagementRoute.TAB_ACTIVE
+                                            }
+                                            route.copy(initialTab = initialTab)
+                                        }
+                                        else -> route
+                                    }
+
+                                    navController.navigate(targetRoute) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
                                         }
                                         launchSingleTop = true
-                                        restoreState = true
+                                        restoreState = targetRoute !is CacheManagementRoute
                                     }
                                 }
                             )

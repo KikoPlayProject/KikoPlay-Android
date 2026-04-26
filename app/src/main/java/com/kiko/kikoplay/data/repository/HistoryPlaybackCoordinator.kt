@@ -11,6 +11,7 @@ data class HistoryPlaybackTarget(
     val sourceType: Int,
     val danmuPool: String?,
     val animeTitle: String?,
+    val serverAddress: String? = null,
     val localPath: String? = null,
     val startPositionMs: Long = 0L,
     val initialPlayTimeState: Int = 0
@@ -91,6 +92,7 @@ class HistoryPlaybackCoordinator @Inject constructor(
             sourceType = SOURCE_TYPE_CACHE,
             danmuPool = item.danmuPool,
             animeTitle = item.animeTitle,
+            serverAddress = item.serverAddress,
             localPath = cacheTask.localPath,
             startPositionMs = normalizeResumePositionMs(item.playTime, item.playTimeState),
             initialPlayTimeState = item.playTimeState
@@ -117,6 +119,7 @@ class HistoryPlaybackCoordinator @Inject constructor(
                 sourceType = SOURCE_TYPE_CACHE,
                 danmuPool = item.danmuPool,
                 animeTitle = item.animeTitle,
+                serverAddress = item.serverAddress,
                 localPath = localPath,
                 startPositionMs = normalizeResumePositionMs(item.playTime, item.playTimeState),
                 initialPlayTimeState = item.playTimeState
@@ -143,6 +146,7 @@ class HistoryPlaybackCoordinator @Inject constructor(
             sourceType = SOURCE_TYPE_PC,
             danmuPool = danmuPool,
             animeTitle = animeTitle,
+            serverAddress = serverAddress,
             startPositionMs = normalizeResumePositionMs(playTime, playTimeState),
             initialPlayTimeState = playTimeState
         )

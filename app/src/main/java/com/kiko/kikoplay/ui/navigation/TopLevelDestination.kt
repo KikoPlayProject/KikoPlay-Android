@@ -33,7 +33,7 @@ enum class TopLevelDestination(
         selectedIcon = Icons.Filled.Download,
         unselectedIcon = Icons.Outlined.Download,
         label = "缓存管理",
-        route = CacheManagementRoute
+        route = CacheManagementRoute()
     ),
     SETTINGS(
         selectedIcon = Icons.Filled.Settings,

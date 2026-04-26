@@ -123,6 +123,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
@@ -155,7 +156,7 @@ private enum class GestureOverlayMode {
 @Composable
 fun VideoPlayerScreen(
     onBack: () -> Unit,
-    onPlayMedia: (mediaId: String, title: String, danmuPool: String?, animeTitle: String?, parentPath: List<Int>, startPositionMs: Long, initialPlayTimeState: Int) -> Unit,
+    onPlayMedia: (VideoPlayerRoute) -> Unit,
     viewModel: VideoPlayerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -189,6 +190,7 @@ fun VideoPlayerScreen(
     val latestOnPlayMedia by rememberUpdatedState(onPlayMedia)
     val finalHistorySaved = remember(uiState.mediaId) { AtomicBoolean(false) }
     val latestContext by rememberUpdatedState(context)
+    val navigationScope = rememberCoroutineScope()
 
     fun captureCurrentFrameThumbnail(): ByteArray? {
         val textureView = latestTextureView ?: return null
@@ -285,15 +287,9 @@ fun VideoPlayerScreen(
                 syncTerminalPlayState(finalPosition, latestDuration)
 
                 val nextEpisode = latestUiState.episodes.nextEpisodeAfter(latestUiState.mediaId) ?: return
-                latestOnPlayMedia(
-                    nextEpisode.mediaId,
-                    nextEpisode.title,
-                    nextEpisode.danmuPool,
-                    nextEpisode.animeTitle,
-                    viewModel.parentPath,
-                    nextEpisode.startPositionMs,
-                    nextEpisode.playTimeState ?: 0
-                )
+                navigationScope.launch {
+                    latestOnPlayMedia(viewModel.resolvePlaybackRouteForEpisode(nextEpisode))
+                }
             }
 
             override fun onVideoSizeChanged(newVideoSize: VideoSize) {
@@ -869,15 +865,9 @@ fun VideoPlayerScreen(
                 isDanmakuRefreshing = uiState.isDanmakuRefreshing,
                 onPlayEpisode = { episode ->
                     syncTerminalPlayState(currentPosition, duration)
-                    onPlayMedia(
-                        episode.mediaId,
-                        episode.title,
-                        episode.danmuPool,
-                        episode.animeTitle,
-                        viewModel.parentPath,
-                        episode.startPositionMs,
-                        episode.playTimeState ?: 0
-                    )
+                    navigationScope.launch {
+                        onPlayMedia(viewModel.resolvePlaybackRouteForEpisode(episode))
+                    }
                 },
                 onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
                 onRefreshDanmaku = { viewModel.refreshDanmaku() },
