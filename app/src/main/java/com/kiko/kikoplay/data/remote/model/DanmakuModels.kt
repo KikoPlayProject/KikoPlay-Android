@@ -27,7 +27,8 @@ data class DanmakuSource(
     val scriptData: String? = null,
     val scriptId: String? = null,
     val scriptName: String? = null,
-    val timeline: String? = null
+    val timeline: String? = null,
+    val clip: String? = null
 )
 
 @Serializable

@@ -122,7 +122,7 @@ PlayerState:
 }
 ```
 ## [Get] /api/danmu/full/
-获取完整的弹幕池。KikoPlay会使用屏蔽规则过滤，但不会应用延迟和时间轴修改，这些信息包含在source中，首先对弹幕原始时间应用时间轴偏移(timeline)，之后应用整体延迟(delay)，才能得到最终弹幕的时间。如果`update=true`，则不会返回`source`和`launchScripts`。  
+获取完整的弹幕池。KikoPlay会使用屏蔽规则过滤，但不会应用裁剪、延迟和时间轴修改，这些信息包含在source中。客户端需要先按裁剪信息(clip)移除范围外弹幕并将范围内弹幕减去裁剪起点，再应用时间轴偏移(timeline)，最后应用整体延迟(delay)，才能得到最终弹幕的时间。如果`update=true`，则不会返回`source`和`launchScripts`。
 参数：  
 > id:  弹幕池ID  
 > update: boolean， true/false，是否更新弹幕池，如果为true则只会返回新添加的弹幕
@@ -157,7 +157,8 @@ Source:
     "scriptData"(string): 脚本数据,
     "scriptId"(string): 脚本ID,
     "scriptName"(string): 脚本名称,
-    "timeline"(string): 时间轴信息，格式为"时间点1(ms) 偏移1(ms);时间点2 偏移2(ms);..."，时间点对应的偏移会影响时间点之后的全部弹幕
+    "timeline"(string): 时间轴信息，格式为"时间点1(ms) 偏移1(ms);时间点2 偏移2(ms);..."，时间点对应的偏移会影响时间点之后的全部弹幕,
+    "clip"(string): 裁剪信息，格式为"clip_start(ms):clip_duration(ms)"，只保留裁剪时间范围内的弹幕，移除时间范围外的弹幕，同时调整裁剪范围内弹幕的时间轴，减去clip_start
 }
 ```
 ## [Post] /api/updateDelay

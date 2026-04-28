@@ -91,16 +91,17 @@ object DanmakuParser {
         val timingBySourceId = sources.associate { source ->
             source.id to SourceTiming(
                 delayMs = source.delay,
-                timelineEntries = parseTimeline(source.timeline)
+                timelineEntries = parseTimeline(source.timeline),
+                clip = parseClip(source.clip)
             )
         }
 
         return comments
-            .map { comment ->
+            .mapNotNull { comment ->
                 val adjustedTimeMs = applySourceTiming(
                     rawTimeMs = comment.rawTimeMs,
                     timing = timingBySourceId[comment.sourceId]
-                )
+                ) ?: return@mapNotNull null
                 adjustedTimeMs to DanmakuItem(
                     time = adjustedTimeMs / 1000f,
                     type = comment.type,
@@ -159,12 +160,18 @@ object DanmakuParser {
 
     private data class SourceTiming(
         val delayMs: Long,
-        val timelineEntries: List<TimelineEntry>
+        val timelineEntries: List<TimelineEntry>,
+        val clip: ClipRange?
     )
 
     private data class TimelineEntry(
         val timePointMs: Long,
         val offsetMs: Long
+    )
+
+    private data class ClipRange(
+        val startMs: Long,
+        val durationMs: Long
     )
 
     private fun parseTimeline(timeline: String?): List<TimelineEntry> {
@@ -188,17 +195,44 @@ object DanmakuParser {
             .sortedBy { it.timePointMs }
     }
 
+    private fun parseClip(clip: String?): ClipRange? {
+        if (clip.isNullOrBlank()) return null
+
+        val parts = clip
+            .trim()
+            .split(':')
+            .map { it.trim() }
+        if (parts.size < 2) return null
+
+        val startMs = parts[0].toLongOrNull() ?: return null
+        val durationMs = parts[1].toLongOrNull() ?: return null
+        if (durationMs < 0L) return null
+
+        return ClipRange(
+            startMs = startMs,
+            durationMs = durationMs
+        )
+    }
+
     private fun applySourceTiming(
         rawTimeMs: Long,
         timing: SourceTiming?
-    ): Long {
-        if (timing == null) return rawTimeMs.coerceAtLeast(0L)
+    ): Long? {
+        if (timing == null) return rawTimeMs.takeIf { it >= 0L }
+
+        var originTimeMs = rawTimeMs
+        timing.clip?.let { clip ->
+            if (originTimeMs < clip.startMs || originTimeMs > clip.startMs + clip.durationMs) {
+                return null
+            }
+            originTimeMs -= clip.startMs
+        }
 
         val timelineOffsetMs = timing.timelineEntries
-            .lastOrNull { rawTimeMs >= it.timePointMs }
-            ?.offsetMs
-            ?: 0L
-        return (rawTimeMs + timelineOffsetMs + timing.delayMs).coerceAtLeast(0L)
+            .takeWhile { originTimeMs > it.timePointMs }
+            .sumOf { it.offsetMs }
+        val adjustedTimeMs = originTimeMs + timelineOffsetMs + timing.delayMs
+        return adjustedTimeMs.takeIf { it >= 0L }
     }
 
     private fun isLightColor(color: Int): Boolean {
