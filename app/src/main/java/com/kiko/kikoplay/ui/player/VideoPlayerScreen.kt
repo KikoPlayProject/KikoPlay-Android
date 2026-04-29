@@ -2555,13 +2555,13 @@ private fun createVideoPlayer(
     if (constrainedPlaybackDevice) {
         loadControlBuilder
             .setBufferDurationsMs(
-                5_000,
                 15_000,
-                750,
-                1_500
+                60_000,
+                1_500,
+                5_000
             )
-            .setTargetBufferBytes(8 * 1024 * 1024)
-            .setPrioritizeTimeOverSizeThresholds(false)
+            .setTargetBufferBytes(64 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
     }
 
     return ExoPlayer.Builder(context, renderersFactory)

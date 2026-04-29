@@ -5,7 +5,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.kiko.kikoplay.data.model.PlayerPreferences
 import kotlinx.coroutines.flow.Flow
@@ -19,8 +18,6 @@ class SettingsRepository @Inject constructor(
 ) {
     companion object {
         val KEY_CACHE_PATH = stringPreferencesKey("cache_path")
-        val KEY_MAX_CACHE_SIZE = longPreferencesKey("max_cache_size") // bytes, 0 = unlimited
-        val KEY_AUTO_CLEAR_CACHE = booleanPreferencesKey("auto_clear_cache")
         val KEY_SYNC_PLAY_PROGRESS = booleanPreferencesKey("sync_play_progress")
         val KEY_PLAYER_DANMAKU_VISIBLE = booleanPreferencesKey("player_danmaku_visible")
         val KEY_PLAYER_DANMAKU_ALPHA = floatPreferencesKey("player_danmaku_alpha")
@@ -35,8 +32,6 @@ class SettingsRepository @Inject constructor(
     }
 
     val cachePath: Flow<String> = dataStore.data.map { it[KEY_CACHE_PATH] ?: "" }
-    val maxCacheSize: Flow<Long> = dataStore.data.map { it[KEY_MAX_CACHE_SIZE] ?: 0L }
-    val autoClearCache: Flow<Boolean> = dataStore.data.map { it[KEY_AUTO_CLEAR_CACHE] ?: false }
     val syncPlayProgress: Flow<Boolean> = dataStore.data.map { it[KEY_SYNC_PLAY_PROGRESS] ?: true }
     val themeMode: Flow<String> = dataStore.data.map { it[KEY_THEME_MODE] ?: "system" }
     val playerPreferences: Flow<PlayerPreferences> = dataStore.data.map { preferences ->
@@ -55,14 +50,6 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setCachePath(path: String) {
         dataStore.edit { it[KEY_CACHE_PATH] = path }
-    }
-
-    suspend fun setMaxCacheSize(bytes: Long) {
-        dataStore.edit { it[KEY_MAX_CACHE_SIZE] = bytes }
-    }
-
-    suspend fun setAutoClearCache(enabled: Boolean) {
-        dataStore.edit { it[KEY_AUTO_CLEAR_CACHE] = enabled }
     }
 
     suspend fun setSyncPlayProgress(enabled: Boolean) {

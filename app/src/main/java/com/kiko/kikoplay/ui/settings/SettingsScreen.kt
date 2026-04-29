@@ -1,7 +1,11 @@
 package com.kiko.kikoplay.ui.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,11 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,12 +42,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val maxCacheSize by viewModel.maxCacheSize.collectAsStateWithLifecycle()
-    val autoClearCache by viewModel.autoClearCache.collectAsStateWithLifecycle()
     val syncPlayProgress by viewModel.syncPlayProgress.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var showCacheSizeDialog by remember { mutableStateOf(false) }
     var showThemeModeDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -66,24 +63,6 @@ fun SettingsScreen(
                 else -> "跟随系统"
             },
             onClick = { showThemeModeDialog = true }
-        )
-
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-        // Cache settings group
-        SettingsGroupHeader("缓存设置")
-
-        SettingsClickItem(
-            title = "最大缓存空间",
-            subtitle = formatCacheSize(maxCacheSize),
-            onClick = { showCacheSizeDialog = true }
-        )
-
-        SettingsSwitchItem(
-            title = "自动清除过期缓存",
-            subtitle = "自动删除超过30天的缓存",
-            checked = autoClearCache,
-            onCheckedChange = { viewModel.setAutoClearCache(it) }
         )
 
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -120,36 +99,16 @@ fun SettingsScreen(
 
         SettingsClickItem(
             title = "反馈建议",
-            subtitle = "通过邮件反馈",
+            subtitle = "点击复制 QQ 群号：874761809",
             onClick = {
-                val intent = Intent(Intent.ACTION_SENDTO).apply {
-                    data = Uri.parse("mailto:")
-                }
-                if (intent.resolveActivity(context.packageManager) != null) {
-                    context.startActivity(intent)
-                }
+                val groupNumber = "874761809"
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("QQ 群号", groupNumber))
+                Toast.makeText(context, "QQ群号已复制：$groupNumber", Toast.LENGTH_SHORT).show()
             }
-        )
-
-        SettingsClickItem(
-            title = "开源协议",
-            subtitle = "查看第三方库许可",
-            onClick = {}
         )
 
         Spacer(Modifier.height(32.dp))
-    }
-
-    // Cache size dialog
-    if (showCacheSizeDialog) {
-        CacheSizeDialog(
-            currentSize = maxCacheSize,
-            onDismiss = { showCacheSizeDialog = false },
-            onSelect = {
-                viewModel.setMaxCacheSize(it)
-                showCacheSizeDialog = false
-            }
-        )
     }
 
     // Theme mode dialog
@@ -221,54 +180,6 @@ private fun SettingsSwitchItem(
         Spacer(Modifier.width(8.dp))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
-}
-
-@Composable
-private fun CacheSizeDialog(
-    currentSize: Long,
-    onDismiss: () -> Unit,
-    onSelect: (Long) -> Unit
-) {
-    val options = listOf(
-        1L * 1024 * 1024 * 1024 to "1 GB",
-        5L * 1024 * 1024 * 1024 to "5 GB",
-        10L * 1024 * 1024 * 1024 to "10 GB",
-        0L to "无限制"
-    )
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("最大缓存空间") },
-        text = {
-            Column {
-                options.forEach { (size, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(size) }
-                            .padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (currentSize == size) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
-}
-
-private fun formatCacheSize(bytes: Long): String {
-    if (bytes <= 0) return "无限制"
-    val gb = bytes / (1024.0 * 1024 * 1024)
-    return if (gb >= 1) "%.0f GB".format(gb) else "%.0f MB".format(bytes / (1024.0 * 1024))
 }
 
 @Composable

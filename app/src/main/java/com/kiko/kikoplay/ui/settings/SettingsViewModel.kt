@@ -15,14 +15,6 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
-    val maxCacheSize: StateFlow<Long> = settingsRepository.maxCacheSize.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), 0L
-    )
-
-    val autoClearCache: StateFlow<Boolean> = settingsRepository.autoClearCache.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), false
-    )
-
     val syncPlayProgress: StateFlow<Boolean> = settingsRepository.syncPlayProgress.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), true
     )
@@ -30,14 +22,6 @@ class SettingsViewModel @Inject constructor(
     val themeMode: StateFlow<String> = settingsRepository.themeMode.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), "system"
     )
-
-    fun setMaxCacheSize(bytes: Long) {
-        viewModelScope.launch { settingsRepository.setMaxCacheSize(bytes) }
-    }
-
-    fun setAutoClearCache(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.setAutoClearCache(enabled) }
-    }
 
     fun setSyncPlayProgress(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setSyncPlayProgress(enabled) }
