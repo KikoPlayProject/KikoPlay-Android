@@ -335,6 +335,9 @@ fun VideoPlayerScreen(
 
         if (window != null && decorView != null && controller != null) {
             WindowCompat.setDecorFitsSystemWindows(window, !fullscreen)
+            window.statusBarColor = android.graphics.Color.BLACK
+            window.navigationBarColor = android.graphics.Color.BLACK
+            controller.isAppearanceLightStatusBars = false
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             if (fullscreen) {
@@ -813,7 +816,7 @@ fun VideoPlayerScreen(
                         onToggleDanmaku = { viewModel.toggleDanmaku() },
                         onToggleFullscreen = {
                             viewModel.setFullscreen(true)
-                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                         },
                         onTogglePortraitFullscreen = {
                             controlsVisible = true
@@ -1523,17 +1526,10 @@ private fun PlayerContentInfo(
 
     Column(modifier = modifier) {
         // Title area
-        Column(modifier = Modifier.padding(16.dp)) {
-            if (animeTitle != null) {
-                Text(animeTitle, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
-            }
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        PlayerContentHeader(
+            title = title,
+            animeTitle = animeTitle
+        )
 
         // Tabs
         PrimaryTabRow(selectedTabIndex = selectedTab) {
@@ -1666,6 +1662,25 @@ private fun PlayerContentPager(
     modifier: Modifier = Modifier
 ) {
     val tabs = listOf("剧集", "弹幕")
+    if (episodes.isEmpty()) {
+        Column(modifier = modifier) {
+            PlayerContentHeader(
+                title = title,
+                animeTitle = animeTitle
+            )
+            DanmakuSourcesPage(
+                currentPositionMs = currentPositionMs,
+                danmakuSourceSummaries = danmakuSourceSummaries,
+                isDanmakuLoading = isDanmakuLoading,
+                isDanmakuRefreshing = isDanmakuRefreshing,
+                onRefreshDanmaku = onRefreshDanmaku,
+                onUpdateDelay = onUpdateDelay,
+                onUpdateTimeline = onUpdateTimeline
+            )
+        }
+        return
+    }
+
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val coroutineScope = rememberCoroutineScope()
     val episodeListState = rememberLazyListState()
@@ -1690,17 +1705,10 @@ private fun PlayerContentPager(
     }
 
     Column(modifier = modifier) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            if (animeTitle != null) {
-                Text(animeTitle, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
-            }
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        PlayerContentHeader(
+            title = title,
+            animeTitle = animeTitle
+        )
 
         PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
             tabs.forEachIndexed { index, tab ->
@@ -1745,6 +1753,24 @@ private fun PlayerContentPager(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PlayerContentHeader(
+    title: String,
+    animeTitle: String?
+) {
+    Column(modifier = Modifier.padding(16.dp)) {
+        if (animeTitle != null) {
+            Text(animeTitle, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

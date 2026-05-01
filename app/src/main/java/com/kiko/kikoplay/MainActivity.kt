@@ -8,13 +8,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -33,7 +34,6 @@ import com.kiko.kikoplay.ui.theme.KikoPlayTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
-import androidx.compose.ui.unit.dp
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -61,28 +61,6 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
 
-            DisposableEffect(resolvedDarkTheme) {
-                enableEdgeToEdge(
-                    statusBarStyle = if (resolvedDarkTheme) {
-                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                    } else {
-                        SystemBarStyle.light(
-                            android.graphics.Color.TRANSPARENT,
-                            android.graphics.Color.TRANSPARENT
-                        )
-                    },
-                    navigationBarStyle = if (resolvedDarkTheme) {
-                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                    } else {
-                        SystemBarStyle.light(
-                            android.graphics.Color.TRANSPARENT,
-                            android.graphics.Color.TRANSPARENT
-                        )
-                    }
-                )
-                onDispose {}
-            }
-
             KikoPlayTheme(darkTheme = resolvedDarkTheme) {
                 val navController = rememberNavController()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -100,9 +78,32 @@ class MainActivity : ComponentActivity() {
                     currentDestination?.hasRoute(dest.route::class) == true
                 }
 
+                DisposableEffect(resolvedDarkTheme, isPlayerRoute) {
+                    val transparent = android.graphics.Color.TRANSPARENT
+                    val darkBarColor = android.graphics.Color.BLACK
+                    enableEdgeToEdge(
+                        statusBarStyle = if (isPlayerRoute) {
+                            SystemBarStyle.dark(darkBarColor)
+                        } else if (resolvedDarkTheme) {
+                            SystemBarStyle.dark(darkBarColor)
+                        } else {
+                            SystemBarStyle.light(transparent, transparent)
+                        },
+                        navigationBarStyle = if (isPlayerRoute) {
+                            SystemBarStyle.dark(darkBarColor)
+                        } else if (resolvedDarkTheme) {
+                            SystemBarStyle.dark(darkBarColor)
+                        } else {
+                            SystemBarStyle.light(transparent, transparent)
+                        }
+                    )
+                    WindowCompat.setDecorFitsSystemWindows(window, !isPlayerRoute)
+                    onDispose {}
+                }
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    contentWindowInsets = if (isPlayerRoute) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars,
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
                         if (showBottomBar) {
                             KikoBottomBar(
