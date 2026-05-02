@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.graphics.Matrix
 import android.content.pm.ActivityInfo
 import android.view.View
+import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -308,6 +309,19 @@ fun VideoPlayerScreen(
         if (!isPlaying && currentPosition > 0) {
             val state = playbackState(currentPosition, duration, uiState.initialPlayTimeState)
             viewModel.syncPlayTime(currentPosition, state, duration)
+        }
+    }
+
+    val shouldKeepScreenOn = isPlaying || (isBuffering && exoPlayer.playWhenReady)
+    DisposableEffect(activity, shouldKeepScreenOn) {
+        val window = activity?.window
+        if (shouldKeepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 

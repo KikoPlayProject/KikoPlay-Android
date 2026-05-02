@@ -25,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kiko.kikoplay.data.repository.CacheRepository
 import com.kiko.kikoplay.data.repository.ConnectionRepository
 import com.kiko.kikoplay.data.repository.SettingsRepository
+import com.kiko.kikoplay.data.repository.StatsRepository
 import com.kiko.kikoplay.ui.navigation.CacheManagementRoute
 import com.kiko.kikoplay.ui.navigation.KikoBottomBar
 import com.kiko.kikoplay.ui.navigation.KikoNavHost
@@ -45,6 +46,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
+
+    @Inject
+    lateinit var statsRepository: StatsRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,6 +144,10 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+        val startupTimeMs = KikoPlayApplication.elapsedSinceProcessStartMs()
+        lifecycleScope.launch {
+            statsRepository.reportDailyStartup(startupTimeMs)
         }
     }
 }
