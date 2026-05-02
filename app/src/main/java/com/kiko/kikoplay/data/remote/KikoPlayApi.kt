@@ -9,6 +9,9 @@ interface KikoPlayApi {
     @GET("api/playlist")
     suspend fun getPlaylist(): List<PlaylistNode>
 
+    @GET("api/recent")
+    suspend fun getRecent(): List<PlaylistNode>
+
     @GET("api/playstate")
     suspend fun getPlayState(): PlayStateResponse
 

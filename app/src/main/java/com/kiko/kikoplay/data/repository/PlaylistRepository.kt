@@ -19,6 +19,7 @@ class PlaylistRepository @Inject constructor(
     private val api: KikoPlayApi
 ) {
     private var cachedPlaylist: List<PlaylistNode>? = null
+    private var cachedRecent: List<PlaylistNode>? = null
     private val _progressUpdates = MutableSharedFlow<PlaylistProgressUpdate>(extraBufferCapacity = 16)
     val progressUpdates: SharedFlow<PlaylistProgressUpdate> = _progressUpdates.asSharedFlow()
 
@@ -28,6 +29,17 @@ class PlaylistRepository @Inject constructor(
             cachedPlaylist = playlist
             Result.success(playlist)
         } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchRecent(): Result<List<PlaylistNode>> {
+        return try {
+            val recent = api.getRecent()
+            cachedRecent = recent
+            Result.success(recent)
+        } catch (e: Exception) {
+            cachedRecent = null
             Result.failure(e)
         }
     }
@@ -71,15 +83,32 @@ class PlaylistRepository @Inject constructor(
         playTimeSeconds: Double,
         playTimeState: Int
     ) {
-        val playlist = cachedPlaylist ?: return
-        val (updated, changed) = updateNodeProgressRecursive(
-            nodes = playlist,
-            mediaId = mediaId,
-            playTimeSeconds = playTimeSeconds,
-            playTimeState = playTimeState
-        )
-        if (!changed) return
-        cachedPlaylist = updated
+        val (updatedPlaylist, playlistChanged) = cachedPlaylist
+            ?.let { playlist ->
+                updateNodeProgressRecursive(
+                    nodes = playlist,
+                    mediaId = mediaId,
+                    playTimeSeconds = playTimeSeconds,
+                    playTimeState = playTimeState
+                )
+            }
+            ?: (null to false)
+        val updatedRecent = cachedRecent?.map { node ->
+            if (node.mediaId == mediaId && !node.isFolder) {
+                node.copy(playTime = playTimeSeconds, playTimeState = playTimeState)
+            } else {
+                node
+            }
+        }
+        val recentChanged = updatedRecent != cachedRecent
+        if (!playlistChanged && !recentChanged) return
+
+        if (playlistChanged) {
+            cachedPlaylist = updatedPlaylist
+        }
+        if (recentChanged) {
+            cachedRecent = updatedRecent
+        }
         _progressUpdates.tryEmit(
             PlaylistProgressUpdate(
                 mediaId = mediaId,
@@ -91,6 +120,7 @@ class PlaylistRepository @Inject constructor(
 
     fun clearCache() {
         cachedPlaylist = null
+        cachedRecent = null
     }
 
     private fun updateNodeProgressRecursive(

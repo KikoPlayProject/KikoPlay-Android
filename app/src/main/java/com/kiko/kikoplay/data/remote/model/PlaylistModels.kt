@@ -12,6 +12,7 @@ data class PlaylistNode(
     val playTimeState: Int? = null,
     val text: String,
     val marker: Int? = null,
+    val cover: String? = null,
     val nodes: List<PlaylistNode>? = null
 ) {
     val isFolder: Boolean get() = nodes != null

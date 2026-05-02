@@ -23,11 +23,19 @@ class SettingsViewModel @Inject constructor(
         viewModelScope, SharingStarted.WhileSubscribed(5000), "system"
     )
 
+    val fetchPcRecent: StateFlow<Boolean> = settingsRepository.fetchPcRecent.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), true
+    )
+
     fun setSyncPlayProgress(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setSyncPlayProgress(enabled) }
     }
 
     fun setThemeMode(mode: String) {
         viewModelScope.launch { settingsRepository.setThemeMode(mode) }
+    }
+
+    fun setFetchPcRecent(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setFetchPcRecent(enabled) }
     }
 }

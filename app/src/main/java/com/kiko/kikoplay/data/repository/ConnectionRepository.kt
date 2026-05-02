@@ -14,7 +14,8 @@ import javax.inject.Singleton
 class ConnectionRepository @Inject constructor(
     private val connectionDao: ConnectionDao,
     private val connectionManager: ConnectionManager,
-    private val api: KikoPlayApi
+    private val api: KikoPlayApi,
+    private val playlistRepository: PlaylistRepository
 ) {
     val connectionHistory: Flow<List<ConnectionEntity>> = connectionDao.getAll()
     val activeConnection: StateFlow<ConnectionInfo?> = connectionManager.connection
@@ -23,7 +24,12 @@ class ConnectionRepository @Inject constructor(
 
     suspend fun connect(host: String, port: Int, deviceName: String? = null): Result<Unit> {
         val previousConnection = connectionManager.connection.value
+        val previousAddress = previousConnection?.let { "${it.host}:${it.port}" }
+        val newAddress = "$host:$port"
         return try {
+            if (previousAddress != newAddress) {
+                playlistRepository.clearCache()
+            }
             connectionManager.connect(host, port, deviceName)
             // Validate by calling playstate
             api.getPlayState()
@@ -73,6 +79,7 @@ class ConnectionRepository @Inject constructor(
 
     fun disconnect() {
         connectionManager.disconnect()
+        playlistRepository.clearCache()
     }
 
     suspend fun deleteHistory(entity: ConnectionEntity) {

@@ -54,8 +54,6 @@ import com.kiko.kikoplay.data.repository.HistoryPlaybackTarget
 import com.kiko.kikoplay.ui.common.EmptyState
 import kotlinx.coroutines.flow.collectLatest
 
-private const val HOME_RECENT_HISTORY_LIMIT = 4
-
 @Composable
 fun HomeScreen(
     onNavigateToConnection: () -> Unit = {},
@@ -65,14 +63,20 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val connectionInfo by viewModel.connectionInfo.collectAsStateWithLifecycle()
+    val fetchPcRecent by viewModel.fetchPcRecent.collectAsStateWithLifecycle()
+    val hasLocalHistory by viewModel.hasLocalHistory.collectAsStateWithLifecycle()
     val recentHistory by viewModel.recentHistory.collectAsStateWithLifecycle()
     val recentDirs by viewModel.recentDirs.collectAsStateWithLifecycle()
     val pendingSwitchRequest by viewModel.pendingSwitchRequest.collectAsStateWithLifecycle()
     val isResolvingHistory by viewModel.isResolvingHistory.collectAsStateWithLifecycle()
     val isConnected = connectionInfo != null
 
-    LaunchedEffect(isConnected) {
-        if (isConnected) viewModel.loadRecentDirs()
+    LaunchedEffect(connectionInfo, fetchPcRecent) {
+        if (connectionInfo != null) {
+            viewModel.loadRemoteHomeData()
+        } else {
+            viewModel.clearRemoteHomeData()
+        }
     }
 
     LaunchedEffect(viewModel) {
@@ -227,7 +231,7 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("最近观看", style = MaterialTheme.typography.titleMedium)
-            if (recentHistory.isNotEmpty()) {
+            if (hasLocalHistory) {
                 TextButton(onClick = onNavigateToHistory) { Text("更多") }
             }
         }
@@ -243,7 +247,7 @@ fun HomeScreen(
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                recentHistory.take(HOME_RECENT_HISTORY_LIMIT).forEach { item ->
+                recentHistory.forEach { item ->
                     RecentWatchCard(
                         item = item,
                         onClick = {

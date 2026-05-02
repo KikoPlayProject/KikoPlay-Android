@@ -44,6 +44,7 @@ fun SettingsScreen(
 ) {
     val syncPlayProgress by viewModel.syncPlayProgress.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val fetchPcRecent by viewModel.fetchPcRecent.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showThemeModeDialog by remember { mutableStateOf(false) }
 
@@ -75,6 +76,13 @@ fun SettingsScreen(
             subtitle = "播放时自动同步进度到 PC 端",
             checked = syncPlayProgress,
             onCheckedChange = { viewModel.setSyncPlayProgress(it) }
+        )
+
+        SettingsSwitchItem(
+            title = "获取 PC 最近播放结果",
+            subtitle = "连接后在最近观看中显示 PC 端最近播放",
+            checked = fetchPcRecent,
+            onCheckedChange = { viewModel.setFetchPcRecent(it) }
         )
 
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
