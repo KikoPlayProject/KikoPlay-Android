@@ -86,7 +86,22 @@ powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant release -NoDae
 ### APK 输出目录
 
 - Debug APK: `app/build/outputs/apk/debug/app-debug.apk`
-- Release APK: `app/build/outputs/apk/release/`
+- Release APK: `app/build/outputs/apk/release/app-release.apk`（配置签名时）或 `app-release-unsigned.apk`（未配置签名时）
+
+### Release 签名
+
+Release 构建支持读取项目根目录的本地 `keystore.properties`：
+
+```properties
+storeFile=kikoplay-release.jks
+storePassword=...
+keyAlias=kikoplay
+keyPassword=...
+```
+
+当前本地环境已生成 `kikoplay-release.jks` 与 `keystore.properties`，执行 `powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant release -NoDaemon` 会产出已签名的 `app-release.apk`。这两个文件包含发布密钥或密码，已在 `.gitignore` 中忽略，不应提交到仓库。
+
+如果缺少 `keystore.properties`，release 构建会回退为未签名 APK；此时需要手动签名后才能安装。
 
 ### 仍需注意
 
@@ -94,6 +109,7 @@ powershell -ExecutionPolicy Bypass -File .\build-apk.ps1 -Variant release -NoDae
 - `settings.gradle.kts` 中包含 JitPack 仓库，用于 `DanmakuFlameMaster`
 - Android Studio 自身如果继续走用户目录 `C:\Users\Kikyou\.gradle`，仍可能触发 IDE 侧的缓存损坏问题；脚本构建不依赖这套全局缓存
 - 当前环境可能仍会出现 `SDK XML version 4` 的 warning，这通常与 Android Studio / SDK command-line tools 版本不一致有关，但不一定阻塞脚本构建
+- Release 构建已关闭 APK 依赖信息写入与 `lintVitalRelease`，用于规避当前环境下 `collectReleaseDependencies` / lint 输出目录的本地缓存或权限问题
 
 ## 测试构建策略
 
