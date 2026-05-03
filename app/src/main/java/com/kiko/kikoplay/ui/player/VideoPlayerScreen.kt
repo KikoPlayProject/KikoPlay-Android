@@ -165,6 +165,7 @@ fun VideoPlayerScreen(
     val activity = context as? Activity
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val restoreLandscapeOnStart = remember { uiState.isFullscreen }
     val audioManager = remember { context.getSystemService(Activity.AUDIO_SERVICE) as AudioManager }
     val constrainedPlaybackDevice = remember(context) { isConstrainedPlaybackDevice(context) }
 
@@ -188,10 +189,12 @@ fun VideoPlayerScreen(
     val latestDuration by rememberUpdatedState(duration)
     val latestTextureView by rememberUpdatedState(playerTextureView)
     val latestVideoSize by rememberUpdatedState(videoSize)
+    val latestIsLandscape by rememberUpdatedState(isLandscape)
     val latestOnPlayMedia by rememberUpdatedState(onPlayMedia)
     val finalHistorySaved = remember(uiState.mediaId) { AtomicBoolean(false) }
     val latestContext by rememberUpdatedState(context)
     val navigationScope = rememberCoroutineScope()
+    var handoffFullscreenOnDispose by remember { mutableStateOf(false) }
 
     fun captureCurrentFrameThumbnail(): ByteArray? {
         val textureView = latestTextureView ?: return null
@@ -231,6 +234,10 @@ fun VideoPlayerScreen(
     fun navigateBackWithSnapshot() {
         syncTerminalPlayState(currentPosition, duration)
         onBack()
+    }
+
+    fun shouldKeepLandscapeOnHandoff(): Boolean {
+        return latestIsLandscape || isLandscapeRequested(activity?.requestedOrientation)
     }
 
     BackHandler {
@@ -289,7 +296,12 @@ fun VideoPlayerScreen(
 
                 val nextEpisode = latestUiState.episodes.nextEpisodeAfter(latestUiState.mediaId) ?: return
                 navigationScope.launch {
-                    latestOnPlayMedia(viewModel.resolvePlaybackRouteForEpisode(nextEpisode))
+                    val keepLandscape = shouldKeepLandscapeOnHandoff()
+                    handoffFullscreenOnDispose = keepLandscape
+                    latestOnPlayMedia(
+                        viewModel.resolvePlaybackRouteForEpisode(nextEpisode)
+                            .copy(startFullscreen = keepLandscape)
+                    )
                 }
             }
 
@@ -332,15 +344,24 @@ fun VideoPlayerScreen(
                 syncTerminalPlayState(currentPosition, duration)
             }
             exoPlayer.release()
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if (!handoffFullscreenOnDispose) {
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
         }
     }
 
-    DisposableEffect(activity, isLandscape, uiState.isFullscreen) {
+    LaunchedEffect(restoreLandscapeOnStart) {
+        if (restoreLandscapeOnStart && activity?.requestedOrientation != ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+    }
+
+    val shouldHideSystemBars = isLandscape || uiState.isFullscreen
+
+    DisposableEffect(activity, shouldHideSystemBars) {
         val currentActivity = activity
         val window = currentActivity?.window
         val decorView = window?.decorView
-        val fullscreen = isLandscape || uiState.isFullscreen
         val controller = if (window != null && decorView != null) {
             WindowCompat.getInsetsController(window, decorView)
         } else {
@@ -348,13 +369,13 @@ fun VideoPlayerScreen(
         }
 
         if (window != null && decorView != null && controller != null) {
-            WindowCompat.setDecorFitsSystemWindows(window, !fullscreen)
+            WindowCompat.setDecorFitsSystemWindows(window, !shouldHideSystemBars)
             window.statusBarColor = android.graphics.Color.BLACK
             window.navigationBarColor = android.graphics.Color.BLACK
             controller.isAppearanceLightStatusBars = false
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            if (fullscreen) {
+            if (shouldHideSystemBars) {
                 controller.hide(WindowInsetsCompat.Type.systemBars())
                 decorView.systemUiVisibility =
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
@@ -371,11 +392,28 @@ fun VideoPlayerScreen(
 
         onDispose {
             if (window != null && decorView != null && controller != null) {
-                WindowCompat.setDecorFitsSystemWindows(window, true)
-                controller.show(WindowInsetsCompat.Type.systemBars())
-                decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                if (!handoffFullscreenOnDispose) {
+                    WindowCompat.setDecorFitsSystemWindows(window, true)
+                    controller.show(WindowInsetsCompat.Type.systemBars())
+                    decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                }
             }
         }
+    }
+
+    LaunchedEffect(activity, shouldHideSystemBars) {
+        if (!shouldHideSystemBars) return@LaunchedEffect
+        val window = activity?.window ?: return@LaunchedEffect
+        val decorView = window.decorView ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(window, decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
     }
 
     // DanmakuView — 只创建一次，在竖屏/横屏间复用
@@ -618,6 +656,7 @@ fun VideoPlayerScreen(
                     gestureOverlayMode = null
                     isSpeedBoosting = false
                 },
+                excludeTopGestureArea = true,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -883,7 +922,12 @@ fun VideoPlayerScreen(
                 onPlayEpisode = { episode ->
                     syncTerminalPlayState(currentPosition, duration)
                     navigationScope.launch {
-                        onPlayMedia(viewModel.resolvePlaybackRouteForEpisode(episode))
+                        val keepLandscape = isLandscape || isLandscapeRequested(activity?.requestedOrientation)
+                        handoffFullscreenOnDispose = keepLandscape
+                        onPlayMedia(
+                            viewModel.resolvePlaybackRouteForEpisode(episode)
+                                .copy(startFullscreen = keepLandscape)
+                        )
                     }
                 },
                 onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
@@ -962,13 +1006,16 @@ private fun GestureLayer(
     onVolumeChangeFinish: () -> Unit,
     onSpeedBoostStart: () -> Unit,
     onSpeedBoostEnd: () -> Unit,
+    excludeTopGestureArea: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     val hapticFeedback = LocalHapticFeedback.current
     val horizontalSlopPx = with(density) { 12.dp.toPx() }
     val verticalSlopPx = with(density) { 12.dp.toPx() }
+    val topGestureExclusionPx = if (excludeTopGestureArea) with(density) { 72.dp.toPx() } else 0f
     val cancelThresholdPx = with(density) { 48.dp.toPx() }
+    val verticalAdjustmentScale = 0.7f
     val maxSeekDeltaMs = minOf(180_000L, (duration * 0.2f).toLong().coerceAtLeast(30_000L))
     var layerWidthPx by remember { mutableIntStateOf(0) }
     var layerHeightPx by remember { mutableIntStateOf(0) }
@@ -995,10 +1042,14 @@ private fun GestureLayer(
                 layerWidthPx = it.width
                 layerHeightPx = it.height
             }
-            .pointerInput(Unit) {
+            .pointerInput(topGestureExclusionPx) {
                 detectTapGestures(
-                    onTap = { onToggleControls() },
-                    onDoubleTap = { onTogglePlayPause() }
+                    onTap = { offset ->
+                        if (offset.y >= topGestureExclusionPx) onToggleControls()
+                    },
+                    onDoubleTap = { offset ->
+                        if (offset.y >= topGestureExclusionPx) onTogglePlayPause()
+                    }
                 )
             }
             .pointerInput(layerWidthPx, layerHeightPx) {
@@ -1011,6 +1062,12 @@ private fun GestureLayer(
                         val startPosition = latestCurrentPosition
                         val startX = down.position.x
                         val startY = down.position.y
+                        val verticalControlRegion = when {
+                            startX < layerWidthPx / 3f -> GestureOverlayMode.Brightness
+                            startX > layerWidthPx * 2f / 3f -> GestureOverlayMode.Volume
+                            else -> null
+                        }
+                        val gesturesEnabled = startY >= topGestureExclusionPx
                         val startBrightness = activity?.window?.attributes?.screenBrightness
                             ?.takeIf { it >= 0f }
                             ?: 0.5f
@@ -1032,7 +1089,7 @@ private fun GestureLayer(
                         var previewPosition = startPosition
                         var finishDispatched = false
 
-                        val speedBoostJob = if (isBottomRegion) {
+                        val speedBoostJob = if (gesturesEnabled && isBottomRegion) {
                             launch {
                                 delay(1000)
                                 speedBoostTriggered = true
@@ -1063,15 +1120,26 @@ private fun GestureLayer(
                                 val horizontalDistance = abs(totalHorizontalDrag)
                                 val verticalDistance = abs(totalVerticalDrag)
 
+                                if (!gesturesEnabled) {
+                                    if (horizontalDistance >= horizontalSlopPx || verticalDistance >= verticalSlopPx) {
+                                        speedBoostJob?.cancel()
+                                    }
+                                    continue
+                                }
+
                                 if (!seekActive && !brightnessActive && !volumeActive) {
                                     if (horizontalDistance >= horizontalSlopPx && horizontalDistance > verticalDistance) {
                                         speedBoostJob?.cancel()
                                         seekActive = true
                                         previewPosition = startPosition
                                         latestOnSeekPreviewStart(startPosition)
-                                    } else if (verticalDistance >= verticalSlopPx && verticalDistance > horizontalDistance) {
+                                    } else if (
+                                        verticalControlRegion != null &&
+                                        verticalDistance >= verticalSlopPx &&
+                                        verticalDistance > horizontalDistance
+                                    ) {
                                         speedBoostJob?.cancel()
-                                        if (startX < layerWidthPx / 2f) {
+                                        if (verticalControlRegion == GestureOverlayMode.Brightness) {
                                             brightnessActive = true
                                             latestOnBrightnessChangeStart(startBrightness)
                                         } else {
@@ -1094,12 +1162,12 @@ private fun GestureLayer(
                                     latestOnSeekPreviewChange(previewPosition, cancelled)
                                 } else if (brightnessActive) {
                                     change.consume()
-                                    val fraction = (startBrightness - totalVerticalDrag / layerHeightPx.toFloat())
+                                    val fraction = (startBrightness - (totalVerticalDrag / layerHeightPx.toFloat()) * verticalAdjustmentScale)
                                         .coerceIn(0.01f, 1f)
                                     latestOnBrightnessChange(fraction)
                                 } else if (volumeActive) {
                                     change.consume()
-                                    val fraction = (startVolume - totalVerticalDrag / layerHeightPx.toFloat())
+                                    val fraction = (startVolume - (totalVerticalDrag / layerHeightPx.toFloat()) * verticalAdjustmentScale)
                                         .coerceIn(0f, 1f)
                                     latestOnVolumeChange(fraction)
                                 } else if (speedBoostActive) {
@@ -2738,6 +2806,13 @@ private fun isPortraitVideo(videoSize: VideoSize): Boolean {
     val pixelRatio = videoSize.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
     val displayAspectRatio = (videoWidth.toFloat() * pixelRatio) / videoHeight.toFloat()
     return displayAspectRatio < 1f
+}
+
+private fun isLandscapeRequested(requestedOrientation: Int?): Boolean {
+    return requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
+        requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE ||
+        requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE ||
+        requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
 }
 
 private fun List<EpisodeUiItem>.nextEpisodeAfter(currentMediaId: String): EpisodeUiItem? {

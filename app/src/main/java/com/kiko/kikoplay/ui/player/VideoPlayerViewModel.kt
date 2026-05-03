@@ -111,6 +111,7 @@ class VideoPlayerViewModel @Inject constructor(
             parentPath = route.parentPath,
             startPositionMs = route.startPositionMs,
             initialPlayTimeState = route.initialPlayTimeState,
+            isFullscreen = route.startFullscreen,
             mediaUrl = when (route.sourceType) {
                 1 -> route.localPath ?: ""
                 2 -> route.localPath ?: ""

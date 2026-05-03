@@ -38,7 +38,8 @@ data class VideoPlayerRoute(
     val serverAddress: String? = null,
     val parentPath: List<Int> = emptyList(),
     val startPositionMs: Long = 0L,
-    val initialPlayTimeState: Int = 0
+    val initialPlayTimeState: Int = 0,
+    val startFullscreen: Boolean = false
 )
 
 @Serializable
