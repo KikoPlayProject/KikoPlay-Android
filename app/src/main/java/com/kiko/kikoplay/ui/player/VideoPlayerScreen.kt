@@ -498,6 +498,7 @@ fun VideoPlayerScreen(
     val centerSeekPreviewMs = if (isGestureSeeking) gestureSeekPreviewMs else sliderSeekPreviewMs
     val isPortraitVideo = remember(videoSize) { isPortraitVideo(videoSize) }
     val showPortraitFullscreenToggle = !isLandscape && !uiState.isFullscreen && isPortraitVideo
+    val canSendDanmaku = !uiState.danmuPool.isNullOrBlank()
 
     // Dialog states
     var showSendDanmaku by remember { mutableStateOf(false) }
@@ -530,7 +531,7 @@ fun VideoPlayerScreen(
     }
 
     // Send danmaku sheet
-    if (showSendDanmaku) {
+    if (showSendDanmaku && canSendDanmaku) {
         com.kiko.kikoplay.ui.player.danmaku.SendDanmakuSheet(
             onDismiss = { showSendDanmaku = false },
             onSend = { text, color, type ->
@@ -671,6 +672,7 @@ fun VideoPlayerScreen(
                     isFullscreen = true,
                     usePortraitControls = !isLandscape,
                     showPortraitFullscreenToggle = false,
+                    canSendDanmaku = canSendDanmaku,
                     onBack = {
                         if (uiState.isFullscreen || isLandscape) {
                             viewModel.setFullscreen(false)
@@ -853,6 +855,7 @@ fun VideoPlayerScreen(
                         isFullscreen = false,
                         usePortraitControls = true,
                         showPortraitFullscreenToggle = showPortraitFullscreenToggle,
+                        canSendDanmaku = canSendDanmaku,
                         onBack = ::navigateBackWithSnapshot,
                         onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
                         centerSeekPreviewMs = centerSeekPreviewMs,
@@ -1207,6 +1210,7 @@ private fun PlayerControlsOverlay(
     isFullscreen: Boolean,
     usePortraitControls: Boolean,
     showPortraitFullscreenToggle: Boolean,
+    canSendDanmaku: Boolean,
     onBack: () -> Unit,
     onPlayPause: () -> Unit,
     centerSeekPreviewMs: Long,
@@ -1306,12 +1310,14 @@ private fun PlayerControlsOverlay(
                 modifier = Modifier.widthIn(min = if (isPortraitControls) 70.dp else 80.dp)
             )
 
-            CompactControlButton(onClick = onSendDanmaku) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "发送弹幕",
-                    tint = Color.White
-                )
+            if (canSendDanmaku) {
+                CompactControlButton(onClick = onSendDanmaku) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "发送弹幕",
+                        tint = Color.White
+                    )
+                }
             }
 
             if (!isPortraitControls) {
@@ -1385,9 +1391,11 @@ private fun PlayerControlsOverlay(
                     )
                 }
 
-                // Send danmaku
-                IconButton(onClick = onSendDanmaku) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送弹幕", tint = Color.White)
+                if (canSendDanmaku) {
+                    // Send danmaku
+                    IconButton(onClick = onSendDanmaku) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送弹幕", tint = Color.White)
+                    }
                 }
 
                 // Time

@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Card
@@ -42,6 +44,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,11 +54,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -75,8 +83,12 @@ private const val LABEL_PLAYLIST = "\u64ad\u653e\u5217\u8868"
 private const val LABEL_BACK = "\u8fd4\u56de"
 private const val LABEL_REFRESH = "\u5237\u65b0"
 private const val LABEL_FILTER = "\u7b5b\u9009"
+private const val LABEL_SEARCH = "\u641c\u7d22"
+private const val LABEL_CLOSE_SEARCH = "\u5173\u95ed\u641c\u7d22"
+private const val LABEL_SEARCH_PLACEHOLDER = "\u6309\u6807\u9898\u641c\u7d22"
 private const val LABEL_RETRY = "\u91cd\u8bd5"
 private const val LABEL_EMPTY_DIR = "\u8be5\u76ee\u5f55\u4e0b\u6ca1\u6709\u5185\u5bb9"
+private const val LABEL_NO_SEARCH_RESULT = "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u6761\u76ee"
 private const val LABEL_LOAD_FAILED = "\u52a0\u8f7d\u5931\u8d25"
 private const val LABEL_CANCEL = "\u53d6\u6d88"
 private const val LABEL_CACHE = "\u7f13\u5b58"
@@ -95,9 +107,26 @@ fun PlaylistBrowserScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilterMenu by remember { mutableStateOf(false) }
+    var showSearchBar by rememberSaveable { mutableStateOf(false) }
     val breadcrumbScrollState = rememberScrollState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val searchFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(uiState.searchQuery) {
+        if (uiState.searchQuery.isNotBlank()) {
+            showSearchBar = true
+        }
+    }
+
+    LaunchedEffect(showSearchBar) {
+        if (showSearchBar) {
+            searchFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
 
     fun saveCurrentScrollPosition() {
         viewModel.rememberCurrentScrollPosition(
@@ -163,6 +192,23 @@ fun PlaylistBrowserScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            if (showSearchBar) {
+                                viewModel.setSearchQuery("")
+                                showSearchBar = false
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                            } else {
+                                showSearchBar = true
+                            }
+                        }
+                    ) {
+                        Icon(
+                            if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
+                            contentDescription = if (showSearchBar) LABEL_CLOSE_SEARCH else LABEL_SEARCH
+                        )
+                    }
                     IconButton(onClick = { viewModel.loadPlaylist() }) {
                         Icon(Icons.Default.Refresh, contentDescription = LABEL_REFRESH)
                     }
@@ -218,36 +264,50 @@ fun PlaylistBrowserScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            when {
-                uiState.isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
-
-                uiState.error != null -> {
-                    EmptyState(
-                        icon = Icons.Default.Refresh,
-                        message = uiState.error ?: LABEL_LOAD_FAILED,
-                        actionLabel = LABEL_RETRY,
-                        onAction = { viewModel.loadPlaylist() },
-                        modifier = Modifier.align(Alignment.Center)
+            Column(modifier = Modifier.fillMaxSize()) {
+                AnimatedVisibility(visible = showSearchBar) {
+                    PlaylistSearchField(
+                        query = uiState.searchQuery,
+                        onQueryChange = { viewModel.setSearchQuery(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .focusRequester(searchFocusRequester)
                     )
                 }
 
-                uiState.currentItems.isEmpty() -> {
-                    EmptyState(
-                        icon = Icons.Default.Folder,
-                        message = LABEL_EMPTY_DIR,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
+                Box(modifier = Modifier.weight(1f)) {
+                    when {
+                        uiState.isLoading -> {
+                            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        }
 
-                else -> {
+                        uiState.error != null -> {
+                            EmptyState(
+                                icon = Icons.Default.Refresh,
+                                message = uiState.error ?: LABEL_LOAD_FAILED,
+                                actionLabel = LABEL_RETRY,
+                                onAction = { viewModel.loadPlaylist() },
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
+
+                        uiState.currentItems.isEmpty() -> {
+                            EmptyState(
+                                icon = if (uiState.searchQuery.isBlank()) Icons.Default.Folder else Icons.Default.Search,
+                                message = if (uiState.searchQuery.isBlank()) LABEL_EMPTY_DIR else LABEL_NO_SEARCH_RESULT,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
+
+                        else -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         itemsIndexed(uiState.currentItems) { index, node ->
+                            val sourceIndex = uiState.currentItemSourceIndices.getOrElse(index) { index }
                             PlaylistItemCard(
                                 node = node,
                                 isCached = node.mediaId != null && node.mediaId in uiState.cachedMediaIds,
@@ -258,7 +318,7 @@ fun PlaylistBrowserScreen(
                                         viewModel.toggleSelection(index)
                                     } else if (node.isFolder) {
                                         saveCurrentScrollPosition()
-                                        viewModel.navigateToFolder(index, node)
+                                        viewModel.navigateToFolder(sourceIndex, node)
                                     } else {
                                         saveCurrentScrollPosition()
                                         coroutineScope.launch {
@@ -286,10 +346,43 @@ fun PlaylistBrowserScreen(
                         }
                         item { Spacer(Modifier.height(8.dp)) }
                     }
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun PlaylistSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions.Default,
+        leadingIcon = {
+            Icon(Icons.Default.Search, contentDescription = null)
+        },
+        trailingIcon = {
+            AnimatedVisibility(visible = query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Default.Close, contentDescription = LABEL_CANCEL)
+                }
+            }
+        },
+        placeholder = {
+            Text(LABEL_SEARCH_PLACEHOLDER, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        label = {
+            Text(LABEL_SEARCH)
+        }
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

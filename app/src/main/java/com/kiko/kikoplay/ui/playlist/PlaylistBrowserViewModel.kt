@@ -39,12 +39,19 @@ data class PlaylistUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val currentItems: List<PlaylistNode> = emptyList(),
+    val currentItemSourceIndices: List<Int> = emptyList(),
     val cachedMediaIds: Set<String> = emptySet(),
     val pathStack: List<BreadcrumbItem> = emptyList(),
     val scrollPosition: ListScrollPosition = ListScrollPosition(),
     val filter: PlayStateFilter = PlayStateFilter.ALL,
+    val searchQuery: String = "",
     val isSelectionMode: Boolean = false,
     val selectedIndices: Set<Int> = emptySet()
+)
+
+private data class FilteredPlaylistItems(
+    val items: List<PlaylistNode>,
+    val sourceIndices: List<Int>
 )
 
 @HiltViewModel
@@ -78,11 +85,13 @@ class PlaylistBrowserViewModel @Inject constructor(
             val result = playlistRepository.fetchPlaylist()
             result.onSuccess { nodes ->
                 _uiState.update {
+                    val filtered = applyFilters(nodes, it.filter, it.searchQuery)
                     it.copy(
                         isLoading = false,
-                        currentItems = applyFilter(nodes, it.filter),
+                        currentItems = filtered.items,
+                        currentItemSourceIndices = filtered.sourceIndices,
                         pathStack = emptyList(),
-                        scrollPosition = scrollPositionFor(emptyList())
+                        scrollPosition = scrollPositionForVisibleList(emptyList(), it.searchQuery)
                     )
                 }
             }.onFailure { e ->
@@ -94,6 +103,7 @@ class PlaylistBrowserViewModel @Inject constructor(
     }
 
     fun rememberCurrentScrollPosition(index: Int, offset: Int) {
+        if (_uiState.value.searchQuery.isNotBlank()) return
         scrollPositions[currentPathIndices()] = ListScrollPosition(index = index, offset = offset)
     }
 
@@ -101,10 +111,12 @@ class PlaylistBrowserViewModel @Inject constructor(
         val children = node.nodes ?: return
         _uiState.update { state ->
             val newPath = state.pathStack + BreadcrumbItem(node.text, index)
+            val filtered = applyFilters(children, state.filter, state.searchQuery)
             state.copy(
-                currentItems = applyFilter(children, state.filter),
+                currentItems = filtered.items,
+                currentItemSourceIndices = filtered.sourceIndices,
                 pathStack = newPath,
-                scrollPosition = scrollPositionFor(newPath.map { it.index }),
+                scrollPosition = scrollPositionForVisibleList(newPath.map { it.index }, state.searchQuery),
                 isSelectionMode = false,
                 selectedIndices = emptySet()
             )
@@ -124,10 +136,12 @@ class PlaylistBrowserViewModel @Inject constructor(
         }
 
         _uiState.update {
+            val filtered = applyFilters(items, it.filter, it.searchQuery)
             it.copy(
-                currentItems = applyFilter(items, it.filter),
+                currentItems = filtered.items,
+                currentItemSourceIndices = filtered.sourceIndices,
                 pathStack = newPath,
-                scrollPosition = scrollPositionFor(pathIndices),
+                scrollPosition = scrollPositionForVisibleList(pathIndices, it.searchQuery),
                 isSelectionMode = false,
                 selectedIndices = emptySet()
             )
@@ -139,10 +153,12 @@ class PlaylistBrowserViewModel @Inject constructor(
         if (index < 0) {
             val items = playlistRepository.getCachedPlaylist() ?: emptyList()
             _uiState.update {
+                val filtered = applyFilters(items, it.filter, it.searchQuery)
                 it.copy(
-                    currentItems = applyFilter(items, it.filter),
+                    currentItems = filtered.items,
+                    currentItemSourceIndices = filtered.sourceIndices,
                     pathStack = emptyList(),
-                    scrollPosition = scrollPositionFor(emptyList()),
+                    scrollPosition = scrollPositionForVisibleList(emptyList(), it.searchQuery),
                     isSelectionMode = false,
                     selectedIndices = emptySet()
                 )
@@ -154,10 +170,12 @@ class PlaylistBrowserViewModel @Inject constructor(
         val pathIndices = newPath.map { it.index }
         val items = playlistRepository.getNodeAtPath(pathIndices) ?: emptyList()
         _uiState.update {
+            val filtered = applyFilters(items, it.filter, it.searchQuery)
             it.copy(
-                currentItems = applyFilter(items, it.filter),
+                currentItems = filtered.items,
+                currentItemSourceIndices = filtered.sourceIndices,
                 pathStack = newPath,
-                scrollPosition = scrollPositionFor(pathIndices),
+                scrollPosition = scrollPositionForVisibleList(pathIndices, it.searchQuery),
                 isSelectionMode = false,
                 selectedIndices = emptySet()
             )
@@ -172,10 +190,29 @@ class PlaylistBrowserViewModel @Inject constructor(
             playlistRepository.getNodeAtPath(currentPathIndices(state.pathStack)) ?: emptyList()
         }
         _uiState.update {
+            val filtered = applyFilters(rawItems, filter, it.searchQuery)
             it.copy(
                 filter = filter,
-                currentItems = applyFilter(rawItems, filter),
-                scrollPosition = scrollPositionFor(currentPathIndices(it.pathStack))
+                currentItems = filtered.items,
+                currentItemSourceIndices = filtered.sourceIndices,
+                scrollPosition = scrollPositionForVisibleList(currentPathIndices(it.pathStack), it.searchQuery),
+                isSelectionMode = false,
+                selectedIndices = emptySet()
+            )
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        val rawItems = currentRawItems()
+        _uiState.update {
+            val filtered = applyFilters(rawItems, it.filter, query)
+            it.copy(
+                searchQuery = query,
+                currentItems = filtered.items,
+                currentItemSourceIndices = filtered.sourceIndices,
+                scrollPosition = scrollPositionForVisibleList(currentPathIndices(it.pathStack), query),
+                isSelectionMode = false,
+                selectedIndices = emptySet()
             )
         }
     }
@@ -319,12 +356,22 @@ class PlaylistBrowserViewModel @Inject constructor(
         }
 
         _uiState.update {
-            val refreshedItems = applyFilter(rawItems, it.filter)
+            val filtered = applyFilters(rawItems, it.filter, it.searchQuery)
             it.copy(
-                currentItems = refreshedItems,
-                scrollPosition = scrollPositionFor(currentPathIndices(it.pathStack)),
-                selectedIndices = it.selectedIndices.filter { index -> index in refreshedItems.indices }.toSet()
+                currentItems = filtered.items,
+                currentItemSourceIndices = filtered.sourceIndices,
+                scrollPosition = scrollPositionForVisibleList(currentPathIndices(it.pathStack), it.searchQuery),
+                selectedIndices = it.selectedIndices.filter { index -> index in filtered.items.indices }.toSet()
             )
+        }
+    }
+
+    private fun currentRawItems(): List<PlaylistNode> {
+        val state = _uiState.value
+        return if (state.pathStack.isEmpty()) {
+            playlistRepository.getCachedPlaylist() ?: emptyList()
+        } else {
+            playlistRepository.getNodeAtPath(currentPathIndices(state.pathStack)) ?: emptyList()
         }
     }
 
@@ -342,19 +389,40 @@ class PlaylistBrowserViewModel @Inject constructor(
         return scrollPositions[path] ?: ListScrollPosition()
     }
 
-    private fun applyFilter(items: List<PlaylistNode>, filter: PlayStateFilter): List<PlaylistNode> {
-        if (filter == PlayStateFilter.ALL) return items
-        return items.filter { node ->
-            if (node.isFolder) {
-                true
-            } else {
-                when (filter) {
-                    PlayStateFilter.UNWATCHED -> node.playTimeState == 0
-                    PlayStateFilter.WATCHING -> node.playTimeState == 1
-                    PlayStateFilter.WATCHED -> node.playTimeState == 2
-                    PlayStateFilter.ALL -> true
-                }
+    private fun scrollPositionForVisibleList(path: List<Int>, searchQuery: String): ListScrollPosition {
+        return if (searchQuery.isBlank()) scrollPositionFor(path) else ListScrollPosition()
+    }
+
+    private fun applyFilters(
+        items: List<PlaylistNode>,
+        filter: PlayStateFilter,
+        searchQuery: String
+    ): FilteredPlaylistItems {
+        val query = searchQuery.trim()
+        val matchedItems = mutableListOf<PlaylistNode>()
+        val sourceIndices = mutableListOf<Int>()
+        items.forEachIndexed { index, node ->
+            if (matchesPlayStateFilter(node, filter) && matchesSearchQuery(node, query)) {
+                matchedItems += node
+                sourceIndices += index
             }
         }
+        return FilteredPlaylistItems(items = matchedItems, sourceIndices = sourceIndices)
+    }
+
+    private fun matchesPlayStateFilter(node: PlaylistNode, filter: PlayStateFilter): Boolean {
+        if (filter == PlayStateFilter.ALL || node.isFolder) return true
+        return when (filter) {
+            PlayStateFilter.UNWATCHED -> node.playTimeState == 0
+            PlayStateFilter.WATCHING -> node.playTimeState == 1
+            PlayStateFilter.WATCHED -> node.playTimeState == 2
+            PlayStateFilter.ALL -> true
+        }
+    }
+
+    private fun matchesSearchQuery(node: PlaylistNode, query: String): Boolean {
+        if (query.isBlank()) return true
+        return node.text.contains(query, ignoreCase = true) ||
+            node.nodes?.any { child -> matchesSearchQuery(child, query) } == true
     }
 }
