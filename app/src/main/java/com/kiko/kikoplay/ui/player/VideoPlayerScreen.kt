@@ -1,6 +1,8 @@
 package com.kiko.kikoplay.ui.player
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.AudioManager
@@ -103,6 +105,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -162,7 +165,7 @@ fun VideoPlayerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val activity = context as? Activity
+    val activity = context.findActivity()
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val restoreLandscapeOnStart = remember { uiState.isFullscreen }
@@ -181,6 +184,8 @@ fun VideoPlayerScreen(
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isBuffering by remember { mutableStateOf(true) }
+    var playerPlaybackState by remember { mutableIntStateOf(exoPlayer.playbackState) }
+    var playerPlayWhenReady by remember { mutableStateOf(exoPlayer.playWhenReady) }
     var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
     var autoAdvanceHandled by remember(uiState.mediaId) { mutableStateOf(false) }
     var playerTextureView by remember { mutableStateOf<android.view.TextureView?>(null) }
@@ -280,7 +285,9 @@ fun VideoPlayerScreen(
             currentPosition = exoPlayer.currentPosition
             duration = exoPlayer.duration.coerceAtLeast(0)
             isPlaying = exoPlayer.isPlaying
-            isBuffering = exoPlayer.playbackState == Player.STATE_BUFFERING
+            playerPlaybackState = exoPlayer.playbackState
+            playerPlayWhenReady = exoPlayer.playWhenReady
+            isBuffering = playerPlaybackState == Player.STATE_BUFFERING
             delay(200)
         }
     }
@@ -288,6 +295,8 @@ fun VideoPlayerScreen(
     DisposableEffect(exoPlayer, uiState.mediaId) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                playerPlaybackState = playbackState
+                isBuffering = playbackState == Player.STATE_BUFFERING
                 if (playbackState != Player.STATE_ENDED || autoAdvanceHandled) return
 
                 autoAdvanceHandled = true
@@ -308,6 +317,14 @@ fun VideoPlayerScreen(
             override fun onVideoSizeChanged(newVideoSize: VideoSize) {
                 videoSize = newVideoSize
             }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                playerPlayWhenReady = playWhenReady
+            }
+
+            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                isPlaying = isPlayingNow
+            }
         }
 
         exoPlayer.addListener(listener)
@@ -324,18 +341,11 @@ fun VideoPlayerScreen(
         }
     }
 
-    val shouldKeepScreenOn = isPlaying || (isBuffering && exoPlayer.playWhenReady)
-    DisposableEffect(activity, shouldKeepScreenOn) {
-        val window = activity?.window
-        if (shouldKeepScreenOn) {
-            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-        onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
+    // Keep the screen awake while playback is expected to run, including buffering.
+    val shouldKeepScreenOn = playerPlayWhenReady &&
+        playerPlaybackState != Player.STATE_IDLE &&
+        playerPlaybackState != Player.STATE_ENDED
+    KeepScreenOnEffect(activity = activity, keepScreenOn = shouldKeepScreenOn)
 
     // Cleanup
     DisposableEffect(Unit) {
@@ -939,6 +949,37 @@ fun VideoPlayerScreen(
                 onUpdateTimeline = { id, timeline -> viewModel.updateSourceTimeline(id, timeline) },
                 modifier = Modifier.weight(1f)
             )
+        }
+    }
+}
+
+@Composable
+private fun KeepScreenOnEffect(
+    activity: Activity?,
+    keepScreenOn: Boolean
+) {
+    val view = LocalView.current
+    DisposableEffect(activity, view, keepScreenOn) {
+        val window = activity?.window
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        val hadWindowFlag = window?.attributes?.flags?.and(flag) != 0
+        val hadViewKeepScreenOn = view.keepScreenOn
+
+        if (keepScreenOn) {
+            window?.addFlags(flag)
+            view.keepScreenOn = true
+        } else {
+            window?.clearFlags(flag)
+            view.keepScreenOn = false
+        }
+
+        onDispose {
+            if (hadWindowFlag) {
+                window?.addFlags(flag)
+            } else {
+                window?.clearFlags(flag)
+            }
+            view.keepScreenOn = hadViewKeepScreenOn
         }
     }
 }
@@ -2699,6 +2740,14 @@ private fun isConstrainedPlaybackDevice(context: android.content.Context): Boole
         activityManager.memoryClass <= 192 ||
         activityManager.largeMemoryClass <= 256 ||
         memoryInfo.lowMemory
+}
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 }
 
 private fun Bitmap.toHistoryThumbnailBytes(
