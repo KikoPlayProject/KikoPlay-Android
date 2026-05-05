@@ -1053,8 +1053,6 @@ private fun KeepScreenOnEffect(
     DisposableEffect(activity, view, keepScreenOn) {
         val window = activity?.window
         val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        val hadWindowFlag = window?.attributes?.flags?.and(flag) != 0
-        val hadViewKeepScreenOn = view.keepScreenOn
 
         if (keepScreenOn) {
             window?.addFlags(flag)
@@ -1065,12 +1063,10 @@ private fun KeepScreenOnEffect(
         }
 
         onDispose {
-            if (hadWindowFlag) {
-                window?.addFlags(flag)
-            } else {
-                window?.clearFlags(flag)
-            }
-            view.keepScreenOn = hadViewKeepScreenOn
+            // Do not clear the flag on dispose — when navigating between player instances
+            // (auto-advance to next episode), the old composable disposes before the new one
+            // sets up its effect. Clearing here would create a gap where the system can sleep.
+            // The flag is only cleared explicitly when keepScreenOn becomes false above.
         }
     }
 }
