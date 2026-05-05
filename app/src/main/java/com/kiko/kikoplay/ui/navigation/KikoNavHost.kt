@@ -11,6 +11,7 @@ import com.kiko.kikoplay.ui.connection.ConnectionScreen
 import com.kiko.kikoplay.ui.home.HomeScreen
 import com.kiko.kikoplay.ui.home.WatchHistoryScreen
 import com.kiko.kikoplay.ui.local.LocalVideosScreen
+import com.kiko.kikoplay.ui.player.PlayerPictureInPictureState
 import com.kiko.kikoplay.ui.player.VideoPlayerScreen
 import com.kiko.kikoplay.ui.playlist.PlaylistBrowserScreen
 import com.kiko.kikoplay.ui.settings.SettingsScreen
@@ -18,7 +19,10 @@ import com.kiko.kikoplay.ui.settings.SettingsScreen
 @Composable
 fun KikoNavHost(
     navController: NavHostController,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isInPictureInPictureMode: Boolean = false,
+    backgroundPlaybackEnabled: Boolean = false,
+    onPlayerPictureInPictureStateChange: (PlayerPictureInPictureState) -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -114,7 +118,10 @@ fun KikoNavHost(
                 onPlayMedia = { targetRoute ->
                     navController.popBackStack()
                     navController.navigate(targetRoute)
-                }
+                },
+                isInPictureInPictureMode = isInPictureInPictureMode,
+                backgroundPlaybackEnabled = backgroundPlaybackEnabled,
+                onPictureInPictureStateChange = onPlayerPictureInPictureStateChange
             )
         }
 

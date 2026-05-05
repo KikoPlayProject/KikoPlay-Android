@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
@@ -34,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,6 +47,8 @@ fun SettingsScreen(
     val syncPlayProgress by viewModel.syncPlayProgress.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val fetchPcRecent by viewModel.fetchPcRecent.collectAsStateWithLifecycle()
+    val smallWindowPlayback by viewModel.smallWindowPlayback.collectAsStateWithLifecycle()
+    val backgroundPlayback by viewModel.backgroundPlayback.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showThemeModeDialog by remember { mutableStateOf(false) }
 
@@ -64,6 +68,24 @@ fun SettingsScreen(
                 else -> "跟随系统"
             },
             onClick = { showThemeModeDialog = true }
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+        SettingsGroupHeader("播放")
+
+        SettingsSwitchItem(
+            title = "小窗播放",
+            subtitle = "播放时返回桌面后以小窗口继续播放，仅显示视频",
+            checked = smallWindowPlayback,
+            onCheckedChange = { viewModel.setSmallWindowPlayback(it) }
+        )
+
+        SettingsSwitchItem(
+            title = "后台继续播放",
+            subtitle = "关闭时返回桌面会暂停，回到播放页后自动恢复",
+            checked = backgroundPlayback,
+            onCheckedChange = { viewModel.setBackgroundPlayback(it) }
         )
 
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -177,7 +199,11 @@ private fun SettingsSwitchItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -186,7 +212,7 @@ private fun SettingsSwitchItem(
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

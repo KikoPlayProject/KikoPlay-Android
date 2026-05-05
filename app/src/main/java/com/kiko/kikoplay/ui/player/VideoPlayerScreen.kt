@@ -7,7 +7,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.AudioManager
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.content.pm.ActivityInfo
+import android.util.Rational
 import android.view.View
 import android.view.WindowManager
 import androidx.annotation.OptIn
@@ -111,10 +113,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -161,11 +168,15 @@ private enum class GestureOverlayMode {
 fun VideoPlayerScreen(
     onBack: () -> Unit,
     onPlayMedia: (VideoPlayerRoute) -> Unit,
+    isInPictureInPictureMode: Boolean = false,
+    backgroundPlaybackEnabled: Boolean = false,
+    onPictureInPictureStateChange: (PlayerPictureInPictureState) -> Unit = {},
     viewModel: VideoPlayerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context.findActivity()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val restoreLandscapeOnStart = remember { uiState.isFullscreen }
@@ -187,6 +198,7 @@ fun VideoPlayerScreen(
     var playerPlaybackState by remember { mutableIntStateOf(exoPlayer.playbackState) }
     var playerPlayWhenReady by remember { mutableStateOf(exoPlayer.playWhenReady) }
     var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
+    var playerSurfaceRect by remember { mutableStateOf<Rect?>(null) }
     var autoAdvanceHandled by remember(uiState.mediaId) { mutableStateOf(false) }
     var playerTextureView by remember { mutableStateOf<android.view.TextureView?>(null) }
     val latestUiState by rememberUpdatedState(uiState)
@@ -198,8 +210,11 @@ fun VideoPlayerScreen(
     val latestOnPlayMedia by rememberUpdatedState(onPlayMedia)
     val finalHistorySaved = remember(uiState.mediaId) { AtomicBoolean(false) }
     val latestContext by rememberUpdatedState(context)
+    val latestBackgroundPlaybackEnabled by rememberUpdatedState(backgroundPlaybackEnabled)
+    val latestIsInPictureInPictureMode by rememberUpdatedState(isInPictureInPictureMode)
     val navigationScope = rememberCoroutineScope()
     var handoffFullscreenOnDispose by remember { mutableStateOf(false) }
+    var pausedByBackgroundPolicy by remember { mutableStateOf(false) }
 
     fun captureCurrentFrameThumbnail(): ByteArray? {
         val textureView = latestTextureView ?: return null
@@ -347,9 +362,56 @@ fun VideoPlayerScreen(
         playerPlaybackState != Player.STATE_ENDED
     KeepScreenOnEffect(activity = activity, keepScreenOn = shouldKeepScreenOn)
 
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    if (
+                        !latestBackgroundPlaybackEnabled &&
+                        !latestIsInPictureInPictureMode &&
+                        exoPlayer.playWhenReady &&
+                        exoPlayer.playbackState != Player.STATE_ENDED
+                    ) {
+                        pausedByBackgroundPolicy = true
+                        exoPlayer.pause()
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (pausedByBackgroundPolicy) {
+                        pausedByBackgroundPolicy = false
+                        exoPlayer.play()
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val canEnterPictureInPicture = playerPlayWhenReady &&
+        uiState.mediaUrl.isNotBlank() &&
+        (playerPlaybackState == Player.STATE_READY || playerPlaybackState == Player.STATE_BUFFERING)
+    val pictureInPictureAspectRatio = remember(videoSize) {
+        videoSize.toPictureInPictureAspectRatio()
+    }
+
+    LaunchedEffect(canEnterPictureInPicture, playerSurfaceRect, pictureInPictureAspectRatio) {
+        onPictureInPictureStateChange(
+            PlayerPictureInPictureState(
+                canEnter = canEnterPictureInPicture,
+                sourceRectHint = playerSurfaceRect?.let { Rect(it) },
+                aspectRatio = pictureInPictureAspectRatio
+            )
+        )
+    }
+
     // Cleanup
     DisposableEffect(Unit) {
         onDispose {
+            onPictureInPictureStateChange(PlayerPictureInPictureState())
             if (currentPosition > 0) {
                 syncTerminalPlayState(currentPosition, duration)
             }
@@ -517,6 +579,20 @@ fun VideoPlayerScreen(
 
     val danmakuSettings = uiState.playerPreferences.toDanmakuSettings()
 
+    LaunchedEffect(isInPictureInPictureMode) {
+        if (isInPictureInPictureMode) {
+            controlsVisible = false
+            showSendDanmaku = false
+            showScreenshotDialog = false
+            showDanmakuSettings = false
+            isGestureSeeking = false
+            isGestureSeekCancelled = false
+            isSliderSeeking = false
+            gestureOverlayMode = null
+            isSpeedBoosting = false
+        }
+    }
+
     // Apply danmaku settings to DanmakuContext
     LaunchedEffect(danmakuSettings, danmakuContext) {
         danmakuContext.setDanmakuTransparency(danmakuSettings.alpha)
@@ -541,7 +617,7 @@ fun VideoPlayerScreen(
     }
 
     // Send danmaku sheet
-    if (showSendDanmaku && canSendDanmaku) {
+    if (!isInPictureInPictureMode && showSendDanmaku && canSendDanmaku) {
         com.kiko.kikoplay.ui.player.danmaku.SendDanmakuSheet(
             onDismiss = { showSendDanmaku = false },
             onSend = { text, color, type ->
@@ -551,7 +627,7 @@ fun VideoPlayerScreen(
     }
 
     // Screenshot/clip dialog
-    if (showScreenshotDialog) {
+    if (!isInPictureInPictureMode && showScreenshotDialog) {
         com.kiko.kikoplay.ui.player.components.ScreenshotClipDialog(
             currentPositionMs = currentPosition,
             onDismiss = { showScreenshotDialog = false },
@@ -585,7 +661,20 @@ fun VideoPlayerScreen(
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
     }
 
-    if (isLandscape || uiState.isFullscreen) {
+    if (isInPictureInPictureMode) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            PlayerSurface(
+                exoPlayer = exoPlayer,
+                danmakuView = danmakuView,
+                isDanmakuVisible = false,
+                renderDanmakuLayer = false,
+                videoSize = videoSize,
+                onTextureViewReady = { playerTextureView = it },
+                onSourceRectChanged = { playerSurfaceRect = it },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else if (isLandscape || uiState.isFullscreen) {
         // Fullscreen player
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             PlayerSurface(
@@ -594,6 +683,7 @@ fun VideoPlayerScreen(
                 isDanmakuVisible = uiState.isDanmakuVisible,
                 videoSize = videoSize,
                 onTextureViewReady = { playerTextureView = it },
+                onSourceRectChanged = { playerSurfaceRect = it },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -780,6 +870,7 @@ fun VideoPlayerScreen(
                     isDanmakuVisible = uiState.isDanmakuVisible,
                     videoSize = videoSize,
                     onTextureViewReady = { playerTextureView = it },
+                    onSourceRectChanged = { playerSurfaceRect = it },
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -990,14 +1081,30 @@ private fun PlayerSurface(
     exoPlayer: ExoPlayer,
     danmakuView: DanmakuView,
     isDanmakuVisible: Boolean,
+    renderDanmakuLayer: Boolean = true,
     videoSize: VideoSize,
     onTextureViewReady: (android.view.TextureView) -> Unit,
+    onSourceRectChanged: (Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var playerSurfaceSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val surfaceRefreshKey = remember(videoSize, playerSurfaceSize) { videoSize to playerSurfaceSize }
 
-    Box(modifier = modifier) {
+    Box(
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            val bounds = coordinates.boundsInWindow()
+            if (bounds.width > 0f && bounds.height > 0f) {
+                onSourceRectChanged(
+                    Rect(
+                        bounds.left.roundToInt(),
+                        bounds.top.roundToInt(),
+                        bounds.right.roundToInt(),
+                        bounds.bottom.roundToInt()
+                    )
+                )
+            }
+        }
+    ) {
         AndroidView(
             factory = { ctx ->
                 android.view.TextureView(ctx).also { textureView ->
@@ -1015,18 +1122,20 @@ private fun PlayerSurface(
                 .onSizeChanged { playerSurfaceSize = it }
         )
 
-        // Danmaku overlay — 复用外部创建的 DanmakuView 实例
-        AndroidView(
-            factory = {
-                // 如果 danmakuView 已有 parent，先 detach
-                (danmakuView.parent as? android.view.ViewGroup)?.removeView(danmakuView)
-                danmakuView
-            },
-            update = { view ->
-                view.visibility = if (isDanmakuVisible) android.view.View.VISIBLE else android.view.View.GONE
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+        if (renderDanmakuLayer) {
+            // Danmaku overlay — 复用外部创建的 DanmakuView 实例
+            AndroidView(
+                factory = {
+                    // 如果 danmakuView 已有 parent，先 detach
+                    (danmakuView.parent as? android.view.ViewGroup)?.removeView(danmakuView)
+                    danmakuView
+                },
+                update = { view ->
+                    view.visibility = if (isDanmakuVisible) android.view.View.VISIBLE else android.view.View.GONE
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
 
@@ -2863,6 +2972,15 @@ private fun isPortraitVideo(videoSize: VideoSize): Boolean {
     val pixelRatio = videoSize.pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
     val displayAspectRatio = (videoWidth.toFloat() * pixelRatio) / videoHeight.toFloat()
     return displayAspectRatio < 1f
+}
+
+private fun VideoSize.toPictureInPictureAspectRatio(): Rational {
+    if (width <= 0 || height <= 0) return Rational(16, 9)
+
+    val pixelRatio = pixelWidthHeightRatio.takeIf { it > 0f } ?: 1f
+    val rawAspectRatio = (width.toFloat() * pixelRatio) / height.toFloat()
+    val clampedAspectRatio = rawAspectRatio.coerceIn(0.42f, 2.39f)
+    return Rational((clampedAspectRatio * 1000).roundToInt().coerceAtLeast(1), 1000)
 }
 
 private fun isLandscapeRequested(requestedOrientation: Int?): Boolean {

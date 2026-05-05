@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.kiko.kikoplay.data.model.PlayerPreferences
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,12 +32,23 @@ class SettingsRepository @Inject constructor(
         val KEY_PLAYER_PLAYBACK_SPEED = floatPreferencesKey("player_playback_speed")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_FETCH_PC_RECENT = booleanPreferencesKey("fetch_pc_recent")
+        val KEY_SMALL_WINDOW_PLAYBACK = booleanPreferencesKey("small_window_playback")
+        val KEY_BACKGROUND_PLAYBACK = booleanPreferencesKey("background_playback")
     }
+
+    private val smallWindowPlaybackOverride = MutableStateFlow<Boolean?>(null)
+    private val backgroundPlaybackOverride = MutableStateFlow<Boolean?>(null)
 
     val cachePath: Flow<String> = dataStore.data.map { it[KEY_CACHE_PATH] ?: "" }
     val syncPlayProgress: Flow<Boolean> = dataStore.data.map { it[KEY_SYNC_PLAY_PROGRESS] ?: true }
     val themeMode: Flow<String> = dataStore.data.map { it[KEY_THEME_MODE] ?: "system" }
     val fetchPcRecent: Flow<Boolean> = dataStore.data.map { it[KEY_FETCH_PC_RECENT] ?: true }
+    val smallWindowPlayback: Flow<Boolean> = dataStore.data
+        .map { it[KEY_SMALL_WINDOW_PLAYBACK] ?: false }
+        .combine(smallWindowPlaybackOverride) { persisted, override -> override ?: persisted }
+    val backgroundPlayback: Flow<Boolean> = dataStore.data
+        .map { it[KEY_BACKGROUND_PLAYBACK] ?: false }
+        .combine(backgroundPlaybackOverride) { persisted, override -> override ?: persisted }
     val playerPreferences: Flow<PlayerPreferences> = dataStore.data.map { preferences ->
         PlayerPreferences(
             isDanmakuVisible = preferences[KEY_PLAYER_DANMAKU_VISIBLE] ?: true,
@@ -64,6 +77,16 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setFetchPcRecent(enabled: Boolean) {
         dataStore.edit { it[KEY_FETCH_PC_RECENT] = enabled }
+    }
+
+    suspend fun setSmallWindowPlayback(enabled: Boolean) {
+        smallWindowPlaybackOverride.value = enabled
+        dataStore.edit { it[KEY_SMALL_WINDOW_PLAYBACK] = enabled }
+    }
+
+    suspend fun setBackgroundPlayback(enabled: Boolean) {
+        backgroundPlaybackOverride.value = enabled
+        dataStore.edit { it[KEY_BACKGROUND_PLAYBACK] = enabled }
     }
 
     suspend fun setPlayerPreferences(preferences: PlayerPreferences) {

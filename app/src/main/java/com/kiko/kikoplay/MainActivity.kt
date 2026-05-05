@@ -1,5 +1,9 @@
 package com.kiko.kikoplay
 
+import android.app.PictureInPictureParams
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,7 +16,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -31,6 +38,7 @@ import com.kiko.kikoplay.ui.navigation.KikoBottomBar
 import com.kiko.kikoplay.ui.navigation.KikoNavHost
 import com.kiko.kikoplay.ui.navigation.TopLevelDestination
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
+import com.kiko.kikoplay.ui.player.PlayerPictureInPictureState
 import com.kiko.kikoplay.ui.theme.KikoPlayTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -50,6 +58,11 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var statsRepository: StatsRepository
 
+    private var playerPictureInPictureState = PlayerPictureInPictureState()
+    private var smallWindowPlaybackEnabled = false
+    private var isPlayerRouteActive = false
+    private var isInPictureInPictureModeState by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lifecycleScope.launch {
@@ -59,6 +72,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by settingsRepository.themeMode
                 .collectAsStateWithLifecycle(initialValue = "system")
+            val smallWindowPlayback by settingsRepository.smallWindowPlayback
+                .collectAsStateWithLifecycle(initialValue = false)
+            val backgroundPlayback by settingsRepository.backgroundPlayback
+                .collectAsStateWithLifecycle(initialValue = false)
             val resolvedDarkTheme = when (themeMode) {
                 "dark" -> true
                 "light" -> false
@@ -76,6 +93,17 @@ class MainActivity : ComponentActivity() {
                     .getCompletedTasks()
                     .collectAsStateWithLifecycle(initialValue = emptyList())
                 val isPlayerRoute = currentDestination?.hasRoute(VideoPlayerRoute::class) == true
+                val isInPictureInPictureMode = isInPictureInPictureModeState
+
+                SideEffect {
+                    smallWindowPlaybackEnabled = smallWindowPlayback
+                    isPlayerRouteActive = isPlayerRoute
+                    if (!isPlayerRoute) {
+                        updatePlayerPictureInPictureState(PlayerPictureInPictureState())
+                    } else {
+                        updatePictureInPictureParams()
+                    }
+                }
 
                 // Hide bottom bar on secondary pages
                 val showBottomBar = TopLevelDestination.entries.any { dest ->
@@ -140,7 +168,10 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     KikoNavHost(
                         navController = navController,
-                        modifier = Modifier.padding(if (isPlayerRoute) PaddingValues(0.dp) else innerPadding)
+                        modifier = Modifier.padding(if (isPlayerRoute) PaddingValues(0.dp) else innerPadding),
+                        isInPictureInPictureMode = isInPictureInPictureMode,
+                        backgroundPlaybackEnabled = backgroundPlayback,
+                        onPlayerPictureInPictureStateChange = ::updatePlayerPictureInPictureState
                     )
                 }
             }
@@ -149,5 +180,66 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             statsRepository.reportDailyStartup(startupTimeMs)
         }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.O until Build.VERSION_CODES.S) {
+            enterPictureInPictureIfReady()
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isInPictureInPictureModeState = isInPictureInPictureMode
+    }
+
+    private fun updatePlayerPictureInPictureState(state: PlayerPictureInPictureState) {
+        playerPictureInPictureState = state
+        updatePictureInPictureParams()
+    }
+
+    private fun canEnterPictureInPicture(): Boolean {
+        return supportsPictureInPicture() &&
+            smallWindowPlaybackEnabled &&
+            isPlayerRouteActive &&
+            playerPictureInPictureState.canEnter
+    }
+
+    private fun updatePictureInPictureParams() {
+        if (!supportsPictureInPicture()) return
+        val params = buildPictureInPictureParams(autoEnter = canEnterPictureInPicture()) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching { setPictureInPictureParams(params) }
+        }
+    }
+
+    private fun enterPictureInPictureIfReady() {
+        if (!canEnterPictureInPicture()) return
+        val params = buildPictureInPictureParams(autoEnter = false) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching { enterPictureInPictureMode(params) }
+        }
+    }
+
+    private fun buildPictureInPictureParams(autoEnter: Boolean): PictureInPictureParams? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+        return PictureInPictureParams.Builder()
+            .setAspectRatio(playerPictureInPictureState.aspectRatio)
+            .apply {
+                playerPictureInPictureState.sourceRectHint?.let(::setSourceRectHint)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setAutoEnterEnabled(autoEnter)
+                }
+            }
+            .build()
+    }
+
+    private fun supportsPictureInPicture(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     }
 }
