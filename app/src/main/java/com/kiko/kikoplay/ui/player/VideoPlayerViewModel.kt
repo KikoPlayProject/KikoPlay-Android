@@ -24,6 +24,8 @@ import com.kiko.kikoplay.ui.player.danmaku.DanmakuItem
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
 import com.kiko.kikoplay.ui.player.danmaku.FullDanmakuComment
+import com.kiko.kikoplay.ui.player.subtitle.REMOTE_SUBTITLE_TRACK_ID
+import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackSelector
 import com.kiko.kikoplay.util.CacheFileHelper
 import com.kiko.kikoplay.util.MediaUrlBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -58,6 +60,8 @@ data class PlayerUiState(
     val mediaUrl: String = "",
     val subtitleUrl: String? = null,
     val subtitleFormat: String? = null,
+    val subtitleLabel: String? = null,
+    val subtitleId: String? = null,
     val parentPath: List<Int> = emptyList(),
     val startPositionMs: Long = 0L,
     val initialPlayTimeState: Int = 0,
@@ -256,7 +260,7 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     private fun loadSubtitle() {
-        if (uiState.value.sourceType != 0) return
+        if (!shouldLoadRemoteSubtitle()) return
         viewModelScope.launch {
             try {
                 val result = api.checkSubtitle(route.mediaId)
@@ -264,11 +268,25 @@ class VideoPlayerViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             subtitleFormat = result.type,
-                            subtitleUrl = mediaUrlBuilder.buildSubtitleUrl(result.type, route.mediaId)
+                            subtitleUrl = mediaUrlBuilder.buildSubtitleUrl(result.type, route.mediaId),
+                            subtitleLabel = SubtitleTrackSelector.remoteSubtitleLabel(result.type),
+                            subtitleId = REMOTE_SUBTITLE_TRACK_ID
                         )
                     }
                 }
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun shouldLoadRemoteSubtitle(): Boolean {
+        return when (route.sourceType) {
+            SOURCE_TYPE_PC -> true
+            SOURCE_TYPE_CACHE -> {
+                val activeServerAddress = connectionManager.connection.value?.let { "${it.host}:${it.port}" }
+                val targetServerAddress = route.serverAddress?.takeIf { it.isNotBlank() }
+                activeServerAddress != null && activeServerAddress == targetServerAddress
+            }
+            else -> false
         }
     }
 

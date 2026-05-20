@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kiko.kikoplay.data.model.PlayerPreferences
 import com.kiko.kikoplay.ui.player.components.KikoSlider
+import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackUiItem
 
 data class DanmakuSettings(
     val alpha: Float = 1f,
@@ -77,6 +78,9 @@ private val CardShape = RoundedCornerShape(24.dp)
 fun DanmakuSettingsPanel(
     settings: DanmakuSettings,
     onSettingsChange: (DanmakuSettings) -> Unit,
+    subtitleTracks: List<SubtitleTrackUiItem> = emptyList(),
+    selectedSubtitleTrackId: String = "",
+    onSubtitleTrackSelected: (SubtitleTrackUiItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val panelBrush = Brush.horizontalGradient(
@@ -188,6 +192,23 @@ fun DanmakuSettingsPanel(
                                 selected = settings.playbackSpeed == speed,
                                 onClick = { onSettingsChange(settings.copy(playbackSpeed = speed)) }
                             )
+                        }
+                    }
+                }
+
+                if (subtitleTracks.isNotEmpty()) {
+                    SettingsCard(title = "字幕") {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            subtitleTracks.forEach { track ->
+                                StyledTogglePill(
+                                    label = track.title,
+                                    selected = track.id == selectedSubtitleTrackId,
+                                    onClick = { onSubtitleTrackSelected(track) }
+                                )
+                            }
                         }
                     }
                 }

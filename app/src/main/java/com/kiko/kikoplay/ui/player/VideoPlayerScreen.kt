@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.media.AudioManager
 import android.graphics.Matrix
+import android.net.Uri
 import android.graphics.Rect
 import android.content.pm.ActivityInfo
 import android.util.Rational
@@ -127,19 +128,31 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.Cue
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.ui.SubtitleView
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import com.kiko.kikoplay.ui.player.danmaku.toPlayerPreferences
 import com.kiko.kikoplay.ui.player.danmaku.toDanmakuSettings
+import com.kiko.kikoplay.ui.player.subtitle.REMOTE_SUBTITLE_TRACK_ID
+import com.kiko.kikoplay.ui.player.subtitle.SUBTITLE_TRACK_NONE_ID
+import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackSelector
+import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackSource
+import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackUiItem
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -195,9 +208,15 @@ fun VideoPlayerScreen(
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isBuffering by remember { mutableStateOf(true) }
+    var playbackErrorMessage by remember(uiState.mediaId) { mutableStateOf<String?>(null) }
     var playerPlaybackState by remember { mutableIntStateOf(exoPlayer.playbackState) }
     var playerPlayWhenReady by remember { mutableStateOf(exoPlayer.playWhenReady) }
     var videoSize by remember { mutableStateOf(VideoSize.UNKNOWN) }
+    var currentSubtitleCues by remember { mutableStateOf<List<Cue>>(emptyList()) }
+    var subtitleTracks by remember(uiState.mediaId) { mutableStateOf(listOf(SubtitleTrackSelector.NoneTrack)) }
+    var selectedSubtitleTrackId by remember(uiState.mediaId) { mutableStateOf(SUBTITLE_TRACK_NONE_ID) }
+    var userSelectedSubtitle by remember(uiState.mediaId) { mutableStateOf(false) }
+    var defaultSubtitleApplied by remember(uiState.mediaId) { mutableStateOf(false) }
     var playerSurfaceRect by remember { mutableStateOf<Rect?>(null) }
     var autoAdvanceHandled by remember(uiState.mediaId) { mutableStateOf(false) }
     var playerTextureView by remember { mutableStateOf<android.view.TextureView?>(null) }
@@ -269,28 +288,102 @@ fun VideoPlayerScreen(
         }
     }
 
+    fun applySubtitleTrack(track: SubtitleTrackUiItem, markUserSelection: Boolean) {
+        val builder = exoPlayer.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+
+        if (track.source == SubtitleTrackSource.NONE || track.trackGroup == null || track.trackIndex == C.INDEX_UNSET) {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            selectedSubtitleTrackId = SUBTITLE_TRACK_NONE_ID
+            currentSubtitleCues = emptyList()
+        } else {
+            builder
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(TrackSelectionOverride(track.trackGroup, track.trackIndex))
+            selectedSubtitleTrackId = track.id
+        }
+
+        exoPlayer.trackSelectionParameters = builder.build()
+        if (markUserSelection) {
+            userSelectedSubtitle = true
+        }
+    }
+
+    fun resetTextTrackSelection() {
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .build()
+    }
+
+    fun togglePlayback() {
+        if (exoPlayer.isPlaying) {
+            exoPlayer.pause()
+            return
+        }
+
+        playbackErrorMessage = null
+        if (exoPlayer.playbackState == Player.STATE_IDLE) {
+            exoPlayer.prepare()
+        }
+        exoPlayer.play()
+    }
+
     // Set media source with subtitle
-    LaunchedEffect(uiState.mediaUrl, uiState.subtitleUrl, uiState.startPositionMs) {
+    LaunchedEffect(uiState.mediaUrl, uiState.subtitleUrl, uiState.subtitleFormat, uiState.startPositionMs) {
         if (uiState.mediaUrl.isNotBlank()) {
             val builder = MediaItem.Builder().setUri(uiState.mediaUrl)
             if (!uiState.subtitleUrl.isNullOrBlank()) {
-                val mimeType = when (uiState.subtitleFormat) {
-                    "ass", "ssa" -> "text/x-ssa"
-                    "srt" -> "application/x-subrip"
-                    else -> "text/x-ssa"
-                }
                 val subtitle = MediaItem.SubtitleConfiguration.Builder(
-                    android.net.Uri.parse(uiState.subtitleUrl)
-                ).setMimeType(mimeType).setLanguage("und").build()
+                    Uri.parse(uiState.subtitleUrl)
+                )
+                    .setMimeType(SubtitleTrackSelector.remoteSubtitleMimeType(uiState.subtitleFormat))
+                    .setLanguage("und")
+                    .setLabel(uiState.subtitleLabel ?: SubtitleTrackSelector.remoteSubtitleLabel(uiState.subtitleFormat))
+                    .setId(uiState.subtitleId ?: REMOTE_SUBTITLE_TRACK_ID)
+                    .build()
                 builder.setSubtitleConfigurations(listOf(subtitle))
             }
             val mediaItem = builder.build()
-            if (uiState.startPositionMs > 0L) {
-                exoPlayer.setMediaItem(mediaItem, uiState.startPositionMs)
+            val hasPreparedCurrentMedia = exoPlayer.currentMediaItem != null &&
+                (exoPlayer.playbackState != Player.STATE_IDLE || exoPlayer.currentPosition > 0L)
+            val startPosition = if (hasPreparedCurrentMedia) {
+                exoPlayer.currentPosition.coerceAtLeast(0L)
             } else {
-                exoPlayer.setMediaItem(mediaItem)
+                uiState.startPositionMs
             }
+            val shouldPlayWhenReady = exoPlayer.playWhenReady
+            defaultSubtitleApplied = false
+            currentSubtitleCues = emptyList()
+            playbackErrorMessage = null
+            if (!userSelectedSubtitle) {
+                resetTextTrackSelection()
+            }
+            exoPlayer.setMediaItem(mediaItem, startPosition)
+            exoPlayer.playWhenReady = shouldPlayWhenReady
             exoPlayer.prepare()
+        }
+    }
+
+    LaunchedEffect(subtitleTracks, playerPlaybackState, userSelectedSubtitle, selectedSubtitleTrackId) {
+        if (subtitleTracks.size <= 1) return@LaunchedEffect
+
+        if (userSelectedSubtitle) {
+            val selectedTrack = subtitleTracks.firstOrNull { it.id == selectedSubtitleTrackId }
+            if (selectedTrack != null) {
+                applySubtitleTrack(selectedTrack, markUserSelection = false)
+            }
+            return@LaunchedEffect
+        }
+
+        if (!defaultSubtitleApplied && playerPlaybackState == Player.STATE_READY) {
+            defaultSubtitleApplied = true
+            val defaultTrackId = SubtitleTrackSelector.defaultTrackId(subtitleTracks)
+            val defaultTrack = subtitleTracks.firstOrNull { it.id == defaultTrackId }
+                ?: SubtitleTrackSelector.NoneTrack
+            applySubtitleTrack(defaultTrack, markUserSelection = false)
         }
     }
 
@@ -331,6 +424,25 @@ fun VideoPlayerScreen(
 
             override fun onVideoSizeChanged(newVideoSize: VideoSize) {
                 videoSize = newVideoSize
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                subtitleTracks = SubtitleTrackSelector.fromPlayerTracks(tracks)
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                currentSubtitleCues = cueGroup.cues
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                playbackErrorMessage = if (
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
+                ) {
+                    "视频解码失败，当前设备可能不支持该视频编码"
+                } else {
+                    "播放失败：${error.errorCodeName}"
+                }
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -667,7 +779,9 @@ fun VideoPlayerScreen(
                 exoPlayer = exoPlayer,
                 danmakuView = danmakuView,
                 isDanmakuVisible = false,
+                subtitleCues = emptyList(),
                 renderDanmakuLayer = false,
+                renderSubtitleLayer = false,
                 videoSize = videoSize,
                 onTextureViewReady = { playerTextureView = it },
                 onSourceRectChanged = { playerSurfaceRect = it },
@@ -681,6 +795,7 @@ fun VideoPlayerScreen(
                 exoPlayer = exoPlayer,
                 danmakuView = danmakuView,
                 isDanmakuVisible = uiState.isDanmakuVisible,
+                subtitleCues = currentSubtitleCues,
                 videoSize = videoSize,
                 onTextureViewReady = { playerTextureView = it },
                 onSourceRectChanged = { playerSurfaceRect = it },
@@ -696,7 +811,7 @@ fun VideoPlayerScreen(
                 playbackSpeed = if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed,
                 onToggleControls = { controlsVisible = !controlsVisible },
                 onTogglePlayPause = {
-                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                    togglePlayback()
                 },
                 onSeekPreviewStart = { startPosition ->
                     controlsVisible = true
@@ -781,7 +896,7 @@ fun VideoPlayerScreen(
                             navigateBackWithSnapshot()
                         }
                     },
-                    onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
+                    onPlayPause = { togglePlayback() },
                     centerSeekPreviewMs = centerSeekPreviewMs,
                     onSeekPreviewChange = { previewPosition ->
                         controlsVisible = true
@@ -831,6 +946,13 @@ fun VideoPlayerScreen(
                 )
             }
 
+            playbackErrorMessage?.let { message ->
+                PlaybackErrorOverlay(
+                    message = message,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+
             if (showDanmakuSettings) {
                 Box(
                     modifier = Modifier
@@ -850,7 +972,10 @@ fun VideoPlayerScreen(
             ) {
                 com.kiko.kikoplay.ui.player.danmaku.DanmakuSettingsPanel(
                     settings = danmakuSettings,
-                    onSettingsChange = { viewModel.updatePlayerPreferences(it.toPlayerPreferences(uiState.isDanmakuVisible)) }
+                    onSettingsChange = { viewModel.updatePlayerPreferences(it.toPlayerPreferences(uiState.isDanmakuVisible)) },
+                    subtitleTracks = subtitleTracks,
+                    selectedSubtitleTrackId = selectedSubtitleTrackId,
+                    onSubtitleTrackSelected = { track -> applySubtitleTrack(track, markUserSelection = true) }
                 )
             }
         }
@@ -868,6 +993,7 @@ fun VideoPlayerScreen(
                     exoPlayer = exoPlayer,
                     danmakuView = danmakuView,
                     isDanmakuVisible = uiState.isDanmakuVisible,
+                    subtitleCues = currentSubtitleCues,
                     videoSize = videoSize,
                     onTextureViewReady = { playerTextureView = it },
                     onSourceRectChanged = { playerSurfaceRect = it },
@@ -882,7 +1008,7 @@ fun VideoPlayerScreen(
                     playbackSpeed = if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed,
                     onToggleControls = { controlsVisible = !controlsVisible },
                     onTogglePlayPause = {
-                        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                        togglePlayback()
                     },
                     onSeekPreviewStart = { startPosition ->
                         controlsVisible = true
@@ -958,7 +1084,7 @@ fun VideoPlayerScreen(
                         showPortraitFullscreenToggle = showPortraitFullscreenToggle,
                         canSendDanmaku = canSendDanmaku,
                         onBack = ::navigateBackWithSnapshot,
-                        onPlayPause = { if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play() },
+                        onPlayPause = { togglePlayback() },
                         centerSeekPreviewMs = centerSeekPreviewMs,
                         onSeekPreviewChange = { previewPosition ->
                             controlsVisible = true
@@ -1011,6 +1137,13 @@ fun VideoPlayerScreen(
                         color = Color.White
                     )
                 }
+
+                playbackErrorMessage?.let { message ->
+                    PlaybackErrorOverlay(
+                        message = message,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
             }
 
             // Content info below player
@@ -1041,6 +1174,28 @@ fun VideoPlayerScreen(
                 modifier = Modifier.weight(1f)
             )
         }
+    }
+}
+
+@Composable
+private fun PlaybackErrorOverlay(
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.padding(horizontal = 32.dp),
+        color = Color.Black.copy(alpha = 0.62f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        )
     }
 }
 
@@ -1077,7 +1232,9 @@ private fun PlayerSurface(
     exoPlayer: ExoPlayer,
     danmakuView: DanmakuView,
     isDanmakuVisible: Boolean,
+    subtitleCues: List<Cue>,
     renderDanmakuLayer: Boolean = true,
+    renderSubtitleLayer: Boolean = true,
     videoSize: VideoSize,
     onTextureViewReady: (android.view.TextureView) -> Unit,
     onSourceRectChanged: (Rect) -> Unit = {},
@@ -1128,6 +1285,27 @@ private fun PlayerSurface(
                 },
                 update = { view ->
                     view.visibility = if (isDanmakuVisible) android.view.View.VISIBLE else android.view.View.GONE
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        if (renderSubtitleLayer) {
+            AndroidView(
+                factory = { context ->
+                    SubtitleView(context).apply {
+                        setUserDefaultStyle()
+                        setUserDefaultTextSize()
+                        setBottomPaddingFraction(0.08f)
+                    }
+                },
+                update = { subtitleView ->
+                    subtitleView.setCues(subtitleCues)
+                    subtitleView.visibility = if (subtitleCues.isEmpty()) {
+                        android.view.View.GONE
+                    } else {
+                        android.view.View.VISIBLE
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
