@@ -4,6 +4,8 @@ import com.kiko.kikoplay.data.local.dao.WatchHistoryDao
 import com.kiko.kikoplay.data.local.entity.WatchHistoryEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -12,6 +14,8 @@ class WatchHistoryRepository @Inject constructor(
     private val watchHistoryDao: WatchHistoryDao,
     private val historyThumbnailRepository: HistoryThumbnailRepository
 ) {
+    private val recordMutex = Mutex()
+
     fun getRecent(limit: Int = 20): Flow<List<WatchHistoryEntity>> =
         watchHistoryDao.getRecent(limit.coerceAtLeast(20)).map { items ->
             mergeHistory(items).take(limit)
@@ -34,7 +38,7 @@ class WatchHistoryRepository @Inject constructor(
         thumbnailData: ByteArray? = null,
         danmuPool: String?,
         serverAddress: String?
-    ) {
+    ) = recordMutex.withLock {
         val normalizedSourceType = when {
             sourceType == SOURCE_TYPE_CACHE && !serverAddress.isNullOrBlank() -> SOURCE_TYPE_PC
             else -> sourceType
@@ -49,10 +53,18 @@ class WatchHistoryRepository @Inject constructor(
                 serverAddress = serverAddress
             )
         }
-        val thumbnailData = when {
-            thumbnailData != null -> thumbnailData
-            existing?.thumbnailData != null && existing.localPath == localPath -> existing.thumbnailData
-            else -> historyThumbnailRepository.createThumbnail(localPath) ?: existing?.thumbnailData
+        val resolvedThumbnailData: ByteArray?
+        when {
+            thumbnailData != null -> {
+                resolvedThumbnailData = thumbnailData
+            }
+            existing?.thumbnailData != null && existing.localPath == localPath -> {
+                resolvedThumbnailData = existing.thumbnailData
+            }
+            else -> {
+                val generatedThumbnailData = historyThumbnailRepository.createThumbnail(localPath)
+                resolvedThumbnailData = generatedThumbnailData ?: existing?.thumbnailData
+            }
         }
         watchHistoryDao.upsert(
             WatchHistoryEntity(
@@ -67,7 +79,7 @@ class WatchHistoryRepository @Inject constructor(
                 isCached = isCached,
                 remoteUri = remoteUri,
                 localPath = localPath,
-                thumbnailData = thumbnailData,
+                thumbnailData = resolvedThumbnailData,
                 lastWatched = System.currentTimeMillis(),
                 danmuPool = danmuPool,
                 serverAddress = serverAddress

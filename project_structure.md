@@ -306,7 +306,7 @@ com.kiko.kikoplay/
 - `data/local`: Room 数据库、实体和 DAO
 - `data/model`: DataStore 与跨模块共享的数据模型，当前包含播放器持久化偏好
 - `data/remote`: REST API、连接状态、统计上报接口与网络 DTO
-- `data/repository`: 面向 ViewModel 的仓库层封装，包含历史续播目标解析、缓存 / PC 播放上下文衔接、播放列表与 PC 最近播放缓存、历史缩略图生成、首页最近观看复用、启动统计上报，以及设置页 / 播放器页偏好的 DataStore 持久化逻辑
+- `data/repository`: 面向 ViewModel 的仓库层封装，包含历史续播目标解析、缓存 / PC 播放上下文衔接、播放列表与 PC 最近播放缓存、历史缩略图生成、观看历史串行写入以保留退出播放器时的最终帧缩略图、首页最近观看复用、启动统计上报，以及设置页 / 播放器页偏好的 DataStore 持久化逻辑
 
 ### UI 层
 
