@@ -56,9 +56,9 @@ fun PlayerPreferences.toDanmakuSettings(): DanmakuSettings {
     )
 }
 
-fun DanmakuSettings.toPlayerPreferences(isDanmakuVisible: Boolean): PlayerPreferences {
-    return PlayerPreferences(
-        isDanmakuVisible = isDanmakuVisible,
+fun DanmakuSettings.toPlayerPreferences(basePreferences: PlayerPreferences): PlayerPreferences {
+    return basePreferences.copy(
+        isDanmakuVisible = basePreferences.isDanmakuVisible,
         danmakuAlpha = alpha,
         danmakuFontSize = fontSize,
         danmakuSpeed = speed,

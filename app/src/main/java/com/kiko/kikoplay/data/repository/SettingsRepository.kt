@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.kiko.kikoplay.data.model.PlayerPreferences
+import com.kiko.kikoplay.data.model.SubtitleStylePreset
+import com.kiko.kikoplay.data.model.SubtitleTextSizePreset
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -30,6 +32,8 @@ class SettingsRepository @Inject constructor(
         val KEY_PLAYER_SHOW_TOP_DANMAKU = booleanPreferencesKey("player_show_top_danmaku")
         val KEY_PLAYER_SHOW_BOTTOM_DANMAKU = booleanPreferencesKey("player_show_bottom_danmaku")
         val KEY_PLAYER_PLAYBACK_SPEED = floatPreferencesKey("player_playback_speed")
+        val KEY_PLAYER_SUBTITLE_STYLE_PRESET = stringPreferencesKey("player_subtitle_style_preset")
+        val KEY_PLAYER_SUBTITLE_TEXT_SIZE_PRESET = stringPreferencesKey("player_subtitle_text_size_preset")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_FETCH_PC_RECENT = booleanPreferencesKey("fetch_pc_recent")
         val KEY_SMALL_WINDOW_PLAYBACK = booleanPreferencesKey("small_window_playback")
@@ -59,7 +63,9 @@ class SettingsRepository @Inject constructor(
             showScrollDanmaku = preferences[KEY_PLAYER_SHOW_SCROLL_DANMAKU] ?: true,
             showTopDanmaku = preferences[KEY_PLAYER_SHOW_TOP_DANMAKU] ?: true,
             showBottomDanmaku = preferences[KEY_PLAYER_SHOW_BOTTOM_DANMAKU] ?: true,
-            playbackSpeed = preferences[KEY_PLAYER_PLAYBACK_SPEED] ?: 1f
+            playbackSpeed = preferences[KEY_PLAYER_PLAYBACK_SPEED] ?: 1f,
+            subtitleStylePreset = SubtitleStylePreset.fromStorage(preferences[KEY_PLAYER_SUBTITLE_STYLE_PRESET]),
+            subtitleTextSizePreset = SubtitleTextSizePreset.fromStorage(preferences[KEY_PLAYER_SUBTITLE_TEXT_SIZE_PRESET])
         )
     }
 
@@ -100,6 +106,8 @@ class SettingsRepository @Inject constructor(
             it[KEY_PLAYER_SHOW_TOP_DANMAKU] = preferences.showTopDanmaku
             it[KEY_PLAYER_SHOW_BOTTOM_DANMAKU] = preferences.showBottomDanmaku
             it[KEY_PLAYER_PLAYBACK_SPEED] = preferences.playbackSpeed
+            it[KEY_PLAYER_SUBTITLE_STYLE_PRESET] = preferences.subtitleStylePreset.storageValue
+            it[KEY_PLAYER_SUBTITLE_TEXT_SIZE_PRESET] = preferences.subtitleTextSizePreset.storageValue
         }
     }
 }

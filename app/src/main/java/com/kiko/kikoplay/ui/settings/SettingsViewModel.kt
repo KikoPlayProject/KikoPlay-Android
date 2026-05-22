@@ -2,6 +2,7 @@ package com.kiko.kikoplay.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kiko.kikoplay.data.model.PlayerPreferences
 import com.kiko.kikoplay.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineStart
@@ -38,6 +39,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope, SharingStarted.WhileSubscribed(5000), false
     )
 
+    val playerPreferences: StateFlow<PlayerPreferences> = settingsRepository.playerPreferences.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), PlayerPreferences()
+    )
+
     fun setSyncPlayProgress(enabled: Boolean) {
         persistSetting { settingsRepository.setSyncPlayProgress(enabled) }
     }
@@ -56,6 +61,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setBackgroundPlayback(enabled: Boolean) {
         persistSetting { settingsRepository.setBackgroundPlayback(enabled) }
+    }
+
+    fun updatePlayerPreferences(transform: (PlayerPreferences) -> PlayerPreferences) {
+        persistSetting {
+            settingsRepository.setPlayerPreferences(transform(playerPreferences.value))
+        }
     }
 
     private fun persistSetting(block: suspend () -> Unit) {

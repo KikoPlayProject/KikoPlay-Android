@@ -39,6 +39,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kiko.kikoplay.data.model.SubtitleStylePreset
+import com.kiko.kikoplay.data.model.SubtitleTextSizePreset
 
 @Composable
 fun SettingsScreen(
@@ -49,15 +51,17 @@ fun SettingsScreen(
     val fetchPcRecent by viewModel.fetchPcRecent.collectAsStateWithLifecycle()
     val smallWindowPlayback by viewModel.smallWindowPlayback.collectAsStateWithLifecycle()
     val backgroundPlayback by viewModel.backgroundPlayback.collectAsStateWithLifecycle()
+    val playerPreferences by viewModel.playerPreferences.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showThemeModeDialog by remember { mutableStateOf(false) }
+    var showSubtitleStyleDialog by remember { mutableStateOf(false) }
+    var showSubtitleTextSizeDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        // Appearance settings group
         SettingsGroupHeader("外观")
 
         SettingsClickItem(
@@ -88,9 +92,20 @@ fun SettingsScreen(
             onCheckedChange = { viewModel.setBackgroundPlayback(it) }
         )
 
+        SettingsClickItem(
+            title = "字幕样式",
+            subtitle = playerPreferences.subtitleStylePreset.label(),
+            onClick = { showSubtitleStyleDialog = true }
+        )
+
+        SettingsClickItem(
+            title = "字幕大小",
+            subtitle = playerPreferences.subtitleTextSizePreset.label(),
+            onClick = { showSubtitleTextSizeDialog = true }
+        )
+
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-        // Sync settings group
         SettingsGroupHeader("同步")
 
         SettingsSwitchItem(
@@ -101,7 +116,7 @@ fun SettingsScreen(
         )
 
         SettingsSwitchItem(
-            title = "获取 PC 最近播放结果",
+            title = "获取 PC 最近播放",
             subtitle = "连接后在最近观看中显示 PC 端最近播放",
             checked = fetchPcRecent,
             onCheckedChange = { viewModel.setFetchPcRecent(it) }
@@ -109,7 +124,6 @@ fun SettingsScreen(
 
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-        // About group
         SettingsGroupHeader("关于与帮助")
 
         SettingsClickItem(
@@ -134,14 +148,13 @@ fun SettingsScreen(
                 val groupNumber = "874761809"
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("QQ 群号", groupNumber))
-                Toast.makeText(context, "QQ群号已复制：$groupNumber", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "QQ 群号已复制：$groupNumber", Toast.LENGTH_SHORT).show()
             }
         )
 
         Spacer(Modifier.height(32.dp))
     }
 
-    // Theme mode dialog
     if (showThemeModeDialog) {
         ThemeModeDialog(
             currentMode = themeMode,
@@ -149,6 +162,36 @@ fun SettingsScreen(
             onSelect = {
                 viewModel.setThemeMode(it)
                 showThemeModeDialog = false
+            }
+        )
+    }
+
+    if (showSubtitleStyleDialog) {
+        SelectionDialog(
+            title = "字幕样式",
+            currentValue = playerPreferences.subtitleStylePreset.storageValue,
+            options = SubtitleStylePreset.entries.map { it.storageValue to it.label() },
+            onDismiss = { showSubtitleStyleDialog = false },
+            onSelect = { selected ->
+                viewModel.updatePlayerPreferences { preferences ->
+                    preferences.copy(subtitleStylePreset = SubtitleStylePreset.fromStorage(selected))
+                }
+                showSubtitleStyleDialog = false
+            }
+        )
+    }
+
+    if (showSubtitleTextSizeDialog) {
+        SelectionDialog(
+            title = "字幕大小",
+            currentValue = playerPreferences.subtitleTextSizePreset.storageValue,
+            options = SubtitleTextSizePreset.entries.map { it.storageValue to it.label() },
+            onDismiss = { showSubtitleTextSizeDialog = false },
+            onSelect = { selected ->
+                viewModel.updatePlayerPreferences { preferences ->
+                    preferences.copy(subtitleTextSizePreset = SubtitleTextSizePreset.fromStorage(selected))
+                }
+                showSubtitleTextSizeDialog = false
             }
         )
     }
@@ -179,7 +222,11 @@ private fun SettingsClickItem(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Icon(
             Icons.Default.ChevronRight,
@@ -209,11 +256,52 @@ private fun SettingsSwitchItem(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Spacer(Modifier.width(8.dp))
         Switch(checked = checked, onCheckedChange = null)
     }
+}
+
+@Composable
+private fun SelectionDialog(
+    title: String,
+    currentValue: String,
+    options: List<Pair<String, String>>,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (value, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(value) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (currentValue == value) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable
@@ -255,4 +343,26 @@ private fun ThemeModeDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+private fun SubtitleStylePreset.label(): String {
+    return when (this) {
+        SubtitleStylePreset.SYSTEM -> "跟随系统"
+        SubtitleStylePreset.BLACK_BACKGROUND -> "黑底白字"
+        SubtitleStylePreset.TRANSLUCENT_BLACK_BACKGROUND -> "半透明黑底白字"
+        SubtitleStylePreset.OUTLINE -> "白字描边"
+        SubtitleStylePreset.SHADOW -> "白字阴影"
+        SubtitleStylePreset.YELLOW_OUTLINE -> "黄字描边"
+        SubtitleStylePreset.YELLOW_SHADOW -> "黄字阴影"
+    }
+}
+
+private fun SubtitleTextSizePreset.label(): String {
+    return when (this) {
+        SubtitleTextSizePreset.SYSTEM -> "跟随系统"
+        SubtitleTextSizePreset.SMALL -> "小"
+        SubtitleTextSizePreset.MEDIUM -> "中"
+        SubtitleTextSizePreset.LARGE -> "大"
+        SubtitleTextSizePreset.EXTRA_LARGE -> "超大"
+    }
 }

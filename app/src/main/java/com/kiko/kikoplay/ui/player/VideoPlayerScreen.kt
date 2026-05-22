@@ -141,7 +141,11 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
+import com.kiko.kikoplay.data.model.PlayerPreferences
+import com.kiko.kikoplay.data.model.SubtitleStylePreset
+import com.kiko.kikoplay.data.model.SubtitleTextSizePreset
 import com.kiko.kikoplay.ui.navigation.VideoPlayerRoute
 import com.kiko.kikoplay.ui.player.components.KikoSlider
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
@@ -780,6 +784,7 @@ fun VideoPlayerScreen(
                 danmakuView = danmakuView,
                 isDanmakuVisible = false,
                 subtitleCues = emptyList(),
+                playerPreferences = uiState.playerPreferences,
                 renderDanmakuLayer = false,
                 renderSubtitleLayer = false,
                 videoSize = videoSize,
@@ -796,6 +801,7 @@ fun VideoPlayerScreen(
                 danmakuView = danmakuView,
                 isDanmakuVisible = uiState.isDanmakuVisible,
                 subtitleCues = currentSubtitleCues,
+                playerPreferences = uiState.playerPreferences,
                 videoSize = videoSize,
                 onTextureViewReady = { playerTextureView = it },
                 onSourceRectChanged = { playerSurfaceRect = it },
@@ -972,7 +978,7 @@ fun VideoPlayerScreen(
             ) {
                 com.kiko.kikoplay.ui.player.danmaku.DanmakuSettingsPanel(
                     settings = danmakuSettings,
-                    onSettingsChange = { viewModel.updatePlayerPreferences(it.toPlayerPreferences(uiState.isDanmakuVisible)) },
+                    onSettingsChange = { viewModel.updatePlayerPreferences(it.toPlayerPreferences(uiState.playerPreferences)) },
                     subtitleTracks = subtitleTracks,
                     selectedSubtitleTrackId = selectedSubtitleTrackId,
                     onSubtitleTrackSelected = { track -> applySubtitleTrack(track, markUserSelection = true) }
@@ -994,6 +1000,7 @@ fun VideoPlayerScreen(
                     danmakuView = danmakuView,
                     isDanmakuVisible = uiState.isDanmakuVisible,
                     subtitleCues = currentSubtitleCues,
+                    playerPreferences = uiState.playerPreferences,
                     videoSize = videoSize,
                     onTextureViewReady = { playerTextureView = it },
                     onSourceRectChanged = { playerSurfaceRect = it },
@@ -1233,6 +1240,7 @@ private fun PlayerSurface(
     danmakuView: DanmakuView,
     isDanmakuVisible: Boolean,
     subtitleCues: List<Cue>,
+    playerPreferences: PlayerPreferences,
     renderDanmakuLayer: Boolean = true,
     renderSubtitleLayer: Boolean = true,
     videoSize: VideoSize,
@@ -1296,10 +1304,10 @@ private fun PlayerSurface(
                     SubtitleView(context).apply {
                         setUserDefaultStyle()
                         setUserDefaultTextSize()
-                        setBottomPaddingFraction(0.08f)
                     }
                 },
                 update = { subtitleView ->
+                    subtitleView.applyPlayerSubtitlePreferences(playerPreferences)
                     subtitleView.setCues(subtitleCues)
                     subtitleView.visibility = if (subtitleCues.isEmpty()) {
                         android.view.View.GONE
@@ -1311,6 +1319,104 @@ private fun PlayerSurface(
             )
         }
     }
+}
+
+private fun SubtitleView.applyPlayerSubtitlePreferences(preferences: PlayerPreferences) {
+    when (preferences.subtitleStylePreset) {
+        SubtitleStylePreset.SYSTEM -> setUserDefaultStyle()
+        SubtitleStylePreset.BLACK_BACKGROUND -> {
+            setStyle(
+                CaptionStyleCompat(
+                    android.graphics.Color.WHITE,
+                    android.graphics.Color.BLACK,
+                    android.graphics.Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_NONE,
+                    android.graphics.Color.TRANSPARENT,
+                    null
+                )
+            )
+        }
+
+        SubtitleStylePreset.TRANSLUCENT_BLACK_BACKGROUND -> {
+            setStyle(
+                CaptionStyleCompat(
+                    android.graphics.Color.WHITE,
+                    android.graphics.Color.argb(180, 0, 0, 0),
+                    android.graphics.Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_NONE,
+                    android.graphics.Color.TRANSPARENT,
+                    null
+                )
+            )
+        }
+
+        SubtitleStylePreset.OUTLINE -> {
+            setStyle(
+                CaptionStyleCompat(
+                    android.graphics.Color.WHITE,
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                    android.graphics.Color.BLACK,
+                    null
+                )
+            )
+        }
+
+        SubtitleStylePreset.SHADOW -> {
+            setStyle(
+                CaptionStyleCompat(
+                    android.graphics.Color.WHITE,
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                    android.graphics.Color.BLACK,
+                    null
+                )
+            )
+        }
+
+        SubtitleStylePreset.YELLOW_OUTLINE -> {
+            setStyle(
+                CaptionStyleCompat(
+                    android.graphics.Color.rgb(255, 235, 59),
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                    android.graphics.Color.BLACK,
+                    null
+                )
+            )
+        }
+
+        SubtitleStylePreset.YELLOW_SHADOW -> {
+            setStyle(
+                CaptionStyleCompat(
+                    android.graphics.Color.rgb(255, 235, 59),
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                    android.graphics.Color.BLACK,
+                    null
+                )
+            )
+        }
+    }
+
+    when (preferences.subtitleTextSizePreset) {
+        SubtitleTextSizePreset.SYSTEM -> setUserDefaultTextSize()
+        SubtitleTextSizePreset.SMALL -> setFractionalTextSize(0.04f, false)
+        SubtitleTextSizePreset.MEDIUM -> setFractionalTextSize(0.0533f, false)
+        SubtitleTextSizePreset.LARGE -> setFractionalTextSize(0.065f, false)
+        SubtitleTextSizePreset.EXTRA_LARGE -> setFractionalTextSize(0.078f, false)
+    }
+
+    val useEmbeddedStyle = preferences.subtitleStylePreset == SubtitleStylePreset.SYSTEM
+    val useEmbeddedFontSize = preferences.subtitleStylePreset == SubtitleStylePreset.SYSTEM &&
+        preferences.subtitleTextSizePreset == SubtitleTextSizePreset.SYSTEM
+    setApplyEmbeddedStyles(useEmbeddedStyle)
+    setApplyEmbeddedFontSizes(useEmbeddedFontSize)
+    setBottomPaddingFraction(0.08f)
 }
 
 @Composable

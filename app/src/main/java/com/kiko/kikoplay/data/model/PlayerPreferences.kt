@@ -9,5 +9,7 @@ data class PlayerPreferences(
     val showScrollDanmaku: Boolean = true,
     val showTopDanmaku: Boolean = true,
     val showBottomDanmaku: Boolean = true,
-    val playbackSpeed: Float = 1f
+    val playbackSpeed: Float = 1f,
+    val subtitleStylePreset: SubtitleStylePreset = SubtitleStylePreset.SYSTEM,
+    val subtitleTextSizePreset: SubtitleTextSizePreset = SubtitleTextSizePreset.SYSTEM
 )
