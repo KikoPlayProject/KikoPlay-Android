@@ -1,5 +1,6 @@
 package com.kiko.kikoplay.ui.player
 
+import android.util.Base64
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,12 +30,15 @@ import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackSelector
 import com.kiko.kikoplay.util.CacheFileHelper
 import com.kiko.kikoplay.util.MediaUrlBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 import javax.inject.Inject
@@ -535,58 +539,59 @@ class VideoPlayerViewModel @Inject constructor(
                 }
             )
         }
-        // Record watch history
-        viewModelScope.launch {
-            try {
-                val activeConnection = connectionManager.connection.value
-                val activeServerAddress = activeConnection?.let { "${it.host}:${it.port}" }
-                val cacheTask = cacheRepository.getByMediaId(route.mediaId)
-                val localPath = route.localPath ?: cacheTask?.localPath
-                val serverAddress = when (route.sourceType) {
-                    0 -> activeServerAddress
-                    2 -> cacheTask?.serverAddress ?: activeServerAddress
-                    else -> null
-                }
-                val isCached = when (route.sourceType) {
-                    2 -> true
-                    0 -> cacheRepository.getPlayableCache(route.mediaId, serverAddress) != null
-                    else -> false
-                }
-                val remoteUri = when (route.sourceType) {
-                    0 -> mediaUrlBuilder.buildMediaUrl(route.mediaId)
-                    2 -> serverAddress?.let { "http://$it/media/${route.mediaId}" }
-                    else -> null
-                }
-                watchHistoryRepository.record(
-                    mediaId = route.mediaId,
-                    title = route.title,
-                    animeTitle = route.animeTitle,
-                    playTime = safePositionMs,
-                    duration = durationMs,
-                    playTimeState = playTimeState,
-                    sourceType = route.sourceType,
-                    isCached = isCached,
-                    remoteUri = remoteUri,
-                    localPath = localPath,
-                    thumbnailData = thumbnailData,
-                    danmuPool = route.danmuPool,
-                    serverAddress = serverAddress
-                )
-            } catch (_: Exception) {}
-        }
-        // Sync to PC
-        if (uiState.value.sourceType != 0) return
-        if (!uiState.value.isSyncPlayProgressEnabled) return
-        viewModelScope.launch {
-            try {
-                api.updatePlayTime(
-                    UpdateTimeRequest(
+        val isTerminalSync = thumbnailData != null
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                var resolvedThumbnailData = thumbnailData
+                try {
+                    val activeConnection = connectionManager.connection.value
+                    val activeServerAddress = activeConnection?.let { "${it.host}:${it.port}" }
+                    val cacheTask = cacheRepository.getByMediaId(route.mediaId)
+                    val localPath = route.localPath ?: cacheTask?.localPath
+                    val serverAddress = when (route.sourceType) {
+                        0 -> activeServerAddress
+                        2 -> cacheTask?.serverAddress ?: activeServerAddress
+                        else -> null
+                    }
+                    val isCached = when (route.sourceType) {
+                        2 -> true
+                        0 -> cacheRepository.getPlayableCache(route.mediaId, serverAddress) != null
+                        else -> false
+                    }
+                    val remoteUri = when (route.sourceType) {
+                        0 -> mediaUrlBuilder.buildMediaUrl(route.mediaId)
+                        2 -> serverAddress?.let { "http://$it/media/${route.mediaId}" }
+                        else -> null
+                    }
+                    resolvedThumbnailData = watchHistoryRepository.record(
                         mediaId = route.mediaId,
-                        playTime = playTimeSeconds,
-                        playTimeState = playTimeState
+                        title = route.title,
+                        animeTitle = route.animeTitle,
+                        playTime = safePositionMs,
+                        duration = durationMs,
+                        playTimeState = playTimeState,
+                        sourceType = route.sourceType,
+                        isCached = isCached,
+                        remoteUri = remoteUri,
+                        localPath = localPath,
+                        thumbnailData = thumbnailData,
+                        danmuPool = route.danmuPool,
+                        serverAddress = serverAddress
                     )
-                )
-            } catch (_: Exception) {}
+                } catch (_: Exception) {}
+
+                if (!isTerminalSync || route.sourceType != SOURCE_TYPE_PC || !uiState.value.isSyncPlayProgressEnabled) return@withContext
+                try {
+                    api.updatePlayTime(
+                        UpdateTimeRequest(
+                            mediaId = route.mediaId,
+                            playTime = playTimeSeconds,
+                            playTimeState = playTimeState,
+                            preview = resolvedThumbnailData?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
         }
     }
 

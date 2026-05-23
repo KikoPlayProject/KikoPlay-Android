@@ -250,7 +250,8 @@ fun VideoPlayerScreen(
         val targetHeight = ((viewHeight.toFloat() * targetWidth) / viewWidth)
             .roundToInt()
             .coerceAtLeast(1)
-        val bitmap = runCatching { textureView.getBitmap(targetWidth, targetHeight) }.getOrNull() ?: return null
+        val bitmap = runCatching { textureView.getBitmap(targetWidth, targetHeight) }.getOrNull()
+        if (bitmap == null) return null
         return try {
             runCatching {
                 bitmap.toHistoryThumbnailBytes(videoSize = latestVideoSize)
@@ -3146,7 +3147,7 @@ private fun Bitmap.toHistoryThumbnailBytes(
     val output = ByteArrayOutputStream()
     val thumbnailBitmap = renderHistoryThumbnail(maxWidth, videoSize)
     try {
-        thumbnailBitmap.compress(Bitmap.CompressFormat.JPEG, 80, output)
+        thumbnailBitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
         return output.toByteArray()
     } finally {
         if (thumbnailBitmap != this && !thumbnailBitmap.isRecycled) {

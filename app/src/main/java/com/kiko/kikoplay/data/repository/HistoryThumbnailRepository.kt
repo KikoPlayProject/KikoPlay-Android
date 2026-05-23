@@ -25,16 +25,16 @@ class HistoryThumbnailRepository @Inject constructor() {
                 ?: retriever.frameAtTime
             retriever.release()
 
-            frame?.toThumbnailBytes(maxWidth = 320)
+            frame?.toThumbnailBytes(maxWidth = 192)
         }.getOrNull()
     }
 
     suspend fun createThumbnail(bitmap: Bitmap?): ByteArray? = withContext(Dispatchers.Default) {
-        bitmap?.toThumbnailBytes(maxWidth = 320)
+        bitmap?.toThumbnailBytes(maxWidth = 192)
     }
 
     private fun Bitmap.toThumbnailBytes(maxWidth: Int): ByteArray {
-        return useScaledCopy(maxWidth = maxWidth).toJpegBytes()
+        return useScaledCopy(maxWidth = maxWidth).toPngBytes()
     }
 
     private fun Bitmap.useScaledCopy(maxWidth: Int): Bitmap {
@@ -46,9 +46,9 @@ class HistoryThumbnailRepository @Inject constructor() {
         return scaledBitmap
     }
 
-    private fun Bitmap.toJpegBytes(): ByteArray {
+    private fun Bitmap.toPngBytes(): ByteArray {
         val output = ByteArrayOutputStream()
-        compress(Bitmap.CompressFormat.JPEG, 80, output)
+        compress(Bitmap.CompressFormat.PNG, 100, output)
         if (!isRecycled) recycle()
         return output.toByteArray()
     }

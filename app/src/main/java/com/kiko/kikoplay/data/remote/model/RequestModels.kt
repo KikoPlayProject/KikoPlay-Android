@@ -6,7 +6,8 @@ import kotlinx.serialization.Serializable
 data class UpdateTimeRequest(
     val mediaId: String,
     val playTime: Double,
-    val playTimeState: Int
+    val playTimeState: Int,
+    val preview: String? = null
 )
 
 @Serializable

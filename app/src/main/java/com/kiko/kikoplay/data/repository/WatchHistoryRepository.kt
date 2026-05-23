@@ -38,7 +38,7 @@ class WatchHistoryRepository @Inject constructor(
         thumbnailData: ByteArray? = null,
         danmuPool: String?,
         serverAddress: String?
-    ) = recordMutex.withLock {
+    ): ByteArray? = recordMutex.withLock {
         val normalizedSourceType = when {
             sourceType == SOURCE_TYPE_CACHE && !serverAddress.isNullOrBlank() -> SOURCE_TYPE_PC
             else -> sourceType
@@ -85,6 +85,7 @@ class WatchHistoryRepository @Inject constructor(
                 serverAddress = serverAddress
             )
         )
+        resolvedThumbnailData
     }
 
     suspend fun delete(entity: WatchHistoryEntity) {
