@@ -53,7 +53,8 @@ class ConnectionRepository @Inject constructor(
                 connectionManager.connect(
                     previousConnection.host,
                     previousConnection.port,
-                    previousConnection.deviceName
+                    previousConnection.deviceName,
+                    previousConnection.kikoVersion
                 )
             } else {
                 connectionManager.disconnect()

@@ -2,12 +2,13 @@ package com.kiko.kikoplay.data.remote
 
 import com.kiko.kikoplay.data.remote.model.*
 import okhttp3.ResponseBody
+import retrofit2.Response
 import retrofit2.http.*
 
 interface KikoPlayApi {
 
     @GET("api/playlist")
-    suspend fun getPlaylist(): List<PlaylistNode>
+    suspend fun getPlaylist(): Response<List<PlaylistNode>>
 
     @GET("api/recent")
     suspend fun getRecent(): List<PlaylistNode>

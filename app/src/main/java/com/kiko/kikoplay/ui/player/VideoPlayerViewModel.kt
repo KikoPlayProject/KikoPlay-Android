@@ -582,12 +582,15 @@ class VideoPlayerViewModel @Inject constructor(
 
                 if (!isTerminalSync || route.sourceType != SOURCE_TYPE_PC || !uiState.value.isSyncPlayProgressEnabled) return@withContext
                 try {
+                    val remoteSupportsPreview = connectionManager.connection.value?.kikoVersion?.let { it >= 200100 } == true
                     api.updatePlayTime(
                         UpdateTimeRequest(
                             mediaId = route.mediaId,
                             playTime = playTimeSeconds,
                             playTimeState = playTimeState,
-                            preview = resolvedThumbnailData?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+                            preview = resolvedThumbnailData
+                                ?.takeIf { remoteSupportsPreview }
+                                ?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
                         )
                     )
                 } catch (_: Exception) {}

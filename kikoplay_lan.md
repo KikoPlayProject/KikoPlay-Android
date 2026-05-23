@@ -15,8 +15,10 @@ KikoPlay局域网服务功能提供了一些Web接口供其他客户端（包括
 获取媒体文件的字幕，字幕文件需要和媒体文件名字相同且位于同一目录，可先通过 `/api/subtitle` 检查是否存在字幕文件。
 
 ## [Get] /api/playlist
-获取播放列表。  
+获取播放列表。 
 返回类型：JSON, Array[Node]  
+响应头：
+> `X-Kiko`: KikoPlay 版本号，Android 端会在完成连接并拉取播放列表后读取该值；当版本低于 `200100` 或未返回该头时，`/api/updateTime` 不会附带 `preview`
 Node:
 ```json
 {
@@ -36,7 +38,7 @@ Node:
 返回类型：JSON, Array[Node]  
 Node结构和`/api/playlist`中的定义一致，但不包括这些字段：`marker`，`nodes`，`color`；可能包含`cover`字段，其值为缩略图的base64编码字符串
 ## [Post] /api/updateTime
-更新播放时间，只有用户在局域网服务中开启“同步播放时间”才有效  
+更新播放时间，只有用户在局域网服务中开启“同步播放时间”才有效；`preview` 仅在服务端支持且版本不低于 `200100` 时发送  
 JSON数据格式：
 ```json
 {

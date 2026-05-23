@@ -1,7 +1,9 @@
 package com.kiko.kikoplay.data.repository
 
 import com.kiko.kikoplay.data.remote.KikoPlayApi
+import com.kiko.kikoplay.data.remote.ConnectionManager
 import com.kiko.kikoplay.data.remote.model.PlaylistNode
+import retrofit2.HttpException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -16,7 +18,8 @@ data class PlaylistProgressUpdate(
 
 @Singleton
 class PlaylistRepository @Inject constructor(
-    private val api: KikoPlayApi
+    private val api: KikoPlayApi,
+    private val connectionManager: ConnectionManager
 ) {
     private var cachedPlaylist: List<PlaylistNode>? = null
     private var cachedRecent: List<PlaylistNode>? = null
@@ -25,7 +28,13 @@ class PlaylistRepository @Inject constructor(
 
     suspend fun fetchPlaylist(): Result<List<PlaylistNode>> {
         return try {
-            val playlist = api.getPlaylist()
+            val response = api.getPlaylist()
+            if (!response.isSuccessful) {
+                throw HttpException(response)
+            }
+            val playlist = response.body().orEmpty()
+            val kikoVersion = response.headers()["X-Kiko"]?.toIntOrNull()
+            connectionManager.updateKikoVersion(kikoVersion)
             cachedPlaylist = playlist
             Result.success(playlist)
         } catch (e: Exception) {
