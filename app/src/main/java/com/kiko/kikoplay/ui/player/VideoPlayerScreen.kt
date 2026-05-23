@@ -688,6 +688,11 @@ fun VideoPlayerScreen(
     val isPortraitVideo = remember(videoSize) { isPortraitVideo(videoSize) }
     val showPortraitFullscreenToggle = !isLandscape && !uiState.isFullscreen && isPortraitVideo
     val canSendDanmaku = !uiState.danmuPool.isNullOrBlank()
+    val showCenterGesturePreview = isGestureSeeking ||
+        isSliderSeeking ||
+        gestureOverlayMode == GestureOverlayMode.Brightness ||
+        gestureOverlayMode == GestureOverlayMode.Volume
+    val showSpeedBoostHint = gestureOverlayMode == GestureOverlayMode.Speed
 
     // Dialog states
     var showSendDanmaku by remember { mutableStateOf(false) }
@@ -928,7 +933,7 @@ fun VideoPlayerScreen(
                 )
             }
 
-            if (isGestureSeeking || isSliderSeeking || gestureOverlayMode == GestureOverlayMode.Brightness || gestureOverlayMode == GestureOverlayMode.Volume || gestureOverlayMode == GestureOverlayMode.Speed) {
+            if (showCenterGesturePreview) {
                 CenterSeekPreview(
                     mode = gestureOverlayMode ?: GestureOverlayMode.Seek,
                     previewPosition = centerSeekPreviewMs,
@@ -943,6 +948,14 @@ fun VideoPlayerScreen(
                     volumeFraction = gestureVolumeFraction,
                     speedBoostActive = isSpeedBoosting,
                     modifier = Modifier.align(Alignment.Center)
+                )
+            }
+
+            if (showSpeedBoostHint) {
+                SpeedBoostHint(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(top = 56.dp)
                 )
             }
 
@@ -1121,7 +1134,7 @@ fun VideoPlayerScreen(
                     )
                 }
 
-                if (isGestureSeeking || isSliderSeeking || gestureOverlayMode == GestureOverlayMode.Brightness || gestureOverlayMode == GestureOverlayMode.Volume || gestureOverlayMode == GestureOverlayMode.Speed) {
+                if (showCenterGesturePreview) {
                     CenterSeekPreview(
                         mode = gestureOverlayMode ?: GestureOverlayMode.Seek,
                         previewPosition = centerSeekPreviewMs,
@@ -1136,6 +1149,14 @@ fun VideoPlayerScreen(
                         volumeFraction = gestureVolumeFraction,
                         speedBoostActive = isSpeedBoosting,
                         modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+
+                if (showSpeedBoostHint) {
+                    SpeedBoostHint(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(top = 56.dp)
                     )
                 }
 
@@ -1964,6 +1985,27 @@ private fun CenterSeekPreview(
             text = hintText,
             color = if (cancelled) Color(0xFFFFB74D) else Color.White.copy(alpha = 0.72f),
             style = MaterialTheme.typography.labelMedium
+        )
+    }
+}
+
+@Composable
+private fun SpeedBoostHint(
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .background(
+                color = Color.Black.copy(alpha = 0.42f),
+                shape = RoundedCornerShape(999.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = "2.0x",
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
