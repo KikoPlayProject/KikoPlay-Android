@@ -80,7 +80,7 @@ fun SettingsScreen(
 
         SettingsSwitchItem(
             title = "小窗播放",
-            subtitle = "播放时返回桌面后以小窗口继续播放，仅显示视频",
+            subtitle = "播放时返回桌面后以小窗口继续播放，显示视频和字幕",
             checked = smallWindowPlayback,
             onCheckedChange = { viewModel.setSmallWindowPlayback(it) }
         )
