@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -114,6 +116,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
@@ -196,6 +199,9 @@ fun VideoPlayerScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val isWideSplitWindow = configuration.screenWidthDp >= 840 && configuration.screenHeightDp >= 480
+    val shouldUseFullscreenPlayer = uiState.isFullscreen || (isLandscape && !isWideSplitWindow)
+    val isTabletSplitLayout = isLandscape && isWideSplitWindow && !uiState.isFullscreen
     val restoreLandscapeOnStart = remember { uiState.isFullscreen }
     val audioManager = remember { context.getSystemService(Activity.AUDIO_SERVICE) as AudioManager }
     val constrainedPlaybackDevice = remember(context) { isConstrainedPlaybackDevice(context) }
@@ -281,11 +287,13 @@ fun VideoPlayerScreen(
     }
 
     fun shouldKeepLandscapeOnHandoff(): Boolean {
-        return latestIsLandscape || isLandscapeRequested(activity?.requestedOrientation)
+        return latestUiState.isFullscreen ||
+            (latestIsLandscape && !isWideSplitWindow) ||
+            isLandscapeRequested(activity?.requestedOrientation)
     }
 
     BackHandler {
-        if (uiState.isFullscreen || isLandscape) {
+        if (shouldUseFullscreenPlayer) {
             viewModel.setFullscreen(false)
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         } else {
@@ -545,7 +553,7 @@ fun VideoPlayerScreen(
         }
     }
 
-    val shouldHideSystemBars = isLandscape || uiState.isFullscreen
+    val shouldHideSystemBars = shouldUseFullscreenPlayer
 
     DisposableEffect(activity, shouldHideSystemBars) {
         val currentActivity = activity
@@ -799,7 +807,7 @@ fun VideoPlayerScreen(
                 modifier = Modifier.fillMaxSize()
             )
         }
-    } else if (isLandscape || uiState.isFullscreen) {
+    } else if (shouldUseFullscreenPlayer) {
         // Fullscreen player
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             PlayerSurface(
@@ -999,9 +1007,255 @@ fun VideoPlayerScreen(
                 )
             }
         }
+    } else if (isTabletSplitLayout) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1.35f)
+                        .fillMaxHeight()
+                        .clipToBounds()
+                        .background(Color.Black)
+                ) {
+                    PlayerSurface(
+                        exoPlayer = exoPlayer,
+                        danmakuView = danmakuView,
+                        isDanmakuVisible = uiState.isDanmakuVisible,
+                        subtitleCues = currentSubtitleCues,
+                        playerPreferences = uiState.playerPreferences,
+                        videoSize = videoSize,
+                        onTextureViewReady = { playerTextureView = it },
+                        onSourceRectChanged = { playerSurfaceRect = it },
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    GestureLayer(
+                        currentPosition = currentPosition,
+                        duration = duration,
+                        activity = activity,
+                        audioManager = audioManager,
+                        playbackSpeed = if (isSpeedBoosting) 2f else danmakuSettings.playbackSpeed,
+                        onToggleControls = { controlsVisible = !controlsVisible },
+                        onTogglePlayPause = {
+                            togglePlayback()
+                        },
+                        onSeekPreviewStart = { startPosition ->
+                            controlsVisible = true
+                            isGestureSeeking = true
+                            isGestureSeekCancelled = false
+                            gestureOverlayMode = GestureOverlayMode.Seek
+                            gestureSeekOriginalMs = startPosition
+                            gestureSeekPreviewMs = startPosition
+                        },
+                        onSeekPreviewChange = { previewPosition, cancelled ->
+                            gestureOverlayMode = GestureOverlayMode.Seek
+                            gestureSeekPreviewMs = previewPosition
+                            isGestureSeekCancelled = cancelled
+                        },
+                        onSeekPreviewFinish = { previewPosition, cancelled ->
+                            isGestureSeeking = false
+                            isGestureSeekCancelled = false
+                            gestureSeekPreviewMs = previewPosition
+                            gestureOverlayMode = null
+                            if (!cancelled) {
+                                performSeek(previewPosition)
+                            }
+                        },
+                        onBrightnessChangeStart = { fraction ->
+                            controlsVisible = true
+                            gestureOverlayMode = GestureOverlayMode.Brightness
+                            gestureBrightnessFraction = fraction
+                            applyScreenBrightness(fraction)
+                        },
+                        onBrightnessChange = { fraction ->
+                            gestureOverlayMode = GestureOverlayMode.Brightness
+                            gestureBrightnessFraction = fraction
+                            applyScreenBrightness(fraction)
+                        },
+                        onBrightnessChangeFinish = {
+                            gestureOverlayMode = null
+                        },
+                        onVolumeChangeStart = { fraction ->
+                            controlsVisible = true
+                            gestureOverlayMode = GestureOverlayMode.Volume
+                            gestureVolumeFraction = fraction
+                            applyStreamVolume(fraction)
+                        },
+                        onVolumeChange = { fraction ->
+                            gestureOverlayMode = GestureOverlayMode.Volume
+                            gestureVolumeFraction = fraction
+                            applyStreamVolume(fraction)
+                        },
+                        onVolumeChangeFinish = {
+                            gestureOverlayMode = null
+                        },
+                        onSpeedBoostStart = {
+                            controlsVisible = true
+                            gestureOverlayMode = GestureOverlayMode.Speed
+                            isSpeedBoosting = true
+                        },
+                        onSpeedBoostEnd = {
+                            gestureOverlayMode = null
+                            isSpeedBoosting = false
+                        },
+                        excludeTopGestureArea = true,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    if (controlsVisible) {
+                        PlayerControlsOverlay(
+                            title = uiState.title,
+                            isPlaying = isPlaying,
+                            currentPosition = currentPosition,
+                            duration = duration,
+                            isDanmakuVisible = uiState.isDanmakuVisible,
+                            isFullscreen = false,
+                            usePortraitControls = false,
+                            showPortraitFullscreenToggle = false,
+                            canSendDanmaku = canSendDanmaku,
+                            onBack = ::navigateBackWithSnapshot,
+                            onPlayPause = { togglePlayback() },
+                            centerSeekPreviewMs = centerSeekPreviewMs,
+                            onSeekPreviewChange = { previewPosition ->
+                                controlsVisible = true
+                                isSliderSeeking = true
+                                sliderSeekPreviewMs = previewPosition
+                            },
+                            onSeekPreviewEnd = { previewPosition ->
+                                isSliderSeeking = false
+                                sliderSeekPreviewMs = 0L
+                                performSeek(previewPosition)
+                            },
+                            onToggleDanmaku = { viewModel.toggleDanmaku() },
+                            onToggleFullscreen = {
+                                viewModel.setFullscreen(true)
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            },
+                            onTogglePortraitFullscreen = {},
+                            onScreenshot = { showScreenshotDialog = true },
+                            onSendDanmaku = { showSendDanmaku = true },
+                            onDanmakuSettings = { showDanmakuSettings = !showDanmakuSettings },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    if (showCenterGesturePreview) {
+                        CenterSeekPreview(
+                            mode = gestureOverlayMode ?: GestureOverlayMode.Seek,
+                            previewPosition = centerSeekPreviewMs,
+                            duration = duration,
+                            deltaMs = if (isGestureSeeking) {
+                                gestureSeekPreviewMs - gestureSeekOriginalMs
+                            } else {
+                                centerSeekPreviewMs - currentPosition
+                            },
+                            cancelled = isGestureSeeking && isGestureSeekCancelled,
+                            brightnessFraction = gestureBrightnessFraction,
+                            volumeFraction = gestureVolumeFraction,
+                            speedBoostActive = isSpeedBoosting,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+
+                    if (showSpeedBoostHint) {
+                        SpeedBoostHint(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(top = 56.dp)
+                        )
+                    }
+
+                    if (isBuffering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center).size(48.dp),
+                            color = Color.White
+                        )
+                    }
+
+                    playbackErrorMessage?.let { message ->
+                        PlaybackErrorOverlay(
+                            message = message,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                )
+
+                PlayerContentPager(
+                    currentMediaId = uiState.mediaId,
+                    currentPositionMs = currentPosition,
+                    title = uiState.title,
+                    animeTitle = uiState.animeTitle,
+                    episodes = uiState.episodes,
+                    danmakuSourceSummaries = uiState.danmakuSourceSummaries,
+                    isDanmakuLoading = uiState.isDanmakuLoading,
+                    isDanmakuRefreshing = uiState.isDanmakuRefreshing,
+                    onPlayEpisode = { episode ->
+                        syncTerminalPlayState(currentPosition, duration)
+                        navigationScope.launch {
+                            val keepLandscape = shouldUseFullscreenPlayer ||
+                                isLandscapeRequested(activity?.requestedOrientation)
+                            handoffFullscreenOnDispose = keepLandscape
+                            onPlayMedia(
+                                viewModel.resolvePlaybackRouteForEpisode(episode)
+                                    .copy(startFullscreen = keepLandscape)
+                            )
+                        }
+                    },
+                    onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
+                    onRefreshDanmaku = { viewModel.refreshDanmaku() },
+                    onUpdateDelay = { id, delay -> viewModel.updateSourceDelay(id, delay) },
+                    onUpdateTimeline = { id, timeline -> viewModel.updateSourceTimeline(id, timeline) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
+            }
+
+            if (showDanmakuSettings) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures { showDanmakuSettings = false }
+                        }
+                )
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showDanmakuSettings,
+                enter = androidx.compose.animation.slideInHorizontally { it },
+                exit = androidx.compose.animation.slideOutHorizontally { it },
+                modifier = Modifier.align(Alignment.CenterEnd)
+            ) {
+                com.kiko.kikoplay.ui.player.danmaku.DanmakuSettingsPanel(
+                    settings = danmakuSettings,
+                    onSettingsChange = { viewModel.updatePlayerPreferences(it.toPlayerPreferences(uiState.playerPreferences)) },
+                    subtitleTracks = subtitleTracks,
+                    selectedSubtitleTrackId = selectedSubtitleTrackId,
+                    onSubtitleTrackSelected = { track -> applySubtitleTrack(track, markUserSelection = true) }
+                )
+            }
+        }
     } else {
         // Portrait: player on top + content below
-        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
             // Player area
             Box(
                 modifier = Modifier
@@ -1188,7 +1442,8 @@ fun VideoPlayerScreen(
                 onPlayEpisode = { episode ->
                     syncTerminalPlayState(currentPosition, duration)
                     navigationScope.launch {
-                        val keepLandscape = isLandscape || isLandscapeRequested(activity?.requestedOrientation)
+                        val keepLandscape = shouldUseFullscreenPlayer ||
+                            isLandscapeRequested(activity?.requestedOrientation)
                         handoffFullscreenOnDispose = keepLandscape
                         onPlayMedia(
                             viewModel.resolvePlaybackRouteForEpisode(episode)
@@ -1274,19 +1529,21 @@ private fun PlayerSurface(
     val surfaceRefreshKey = remember(videoSize, playerSurfaceSize) { videoSize to playerSurfaceSize }
 
     Box(
-        modifier = modifier.onGloballyPositioned { coordinates ->
-            val bounds = coordinates.boundsInWindow()
-            if (bounds.width > 0f && bounds.height > 0f) {
-                onSourceRectChanged(
-                    Rect(
-                        bounds.left.roundToInt(),
-                        bounds.top.roundToInt(),
-                        bounds.right.roundToInt(),
-                        bounds.bottom.roundToInt()
+        modifier = modifier
+            .clipToBounds()
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                if (bounds.width > 0f && bounds.height > 0f) {
+                    onSourceRectChanged(
+                        Rect(
+                            bounds.left.roundToInt(),
+                            bounds.top.roundToInt(),
+                            bounds.right.roundToInt(),
+                            bounds.bottom.roundToInt()
+                        )
                     )
-                )
+                }
             }
-        }
     ) {
         AndroidView(
             factory = { ctx ->
