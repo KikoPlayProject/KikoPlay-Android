@@ -201,7 +201,9 @@ fun HomeScreen(
                         )
                     ) {
                         Column(
-                            modifier = Modifier.padding(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(

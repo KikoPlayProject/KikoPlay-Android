@@ -1,7 +1,14 @@
 package com.kiko.kikoplay.ui.navigation
 
+import android.os.SystemClock
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -24,6 +31,22 @@ fun KikoNavHost(
     backgroundPlaybackEnabled: Boolean = false,
     onPlayerPictureInPictureStateChange: (PlayerPictureInPictureState) -> Unit = {}
 ) {
+    var lastBackNavigationAt by remember { mutableLongStateOf(0L) }
+
+    fun navigateUpSafely() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBackNavigationAt < 350L) return
+        val currentDestination = navController.currentDestination ?: return
+        val isTopLevelDestination = TopLevelDestination.entries.any { destination ->
+            currentDestination.hasRoute(destination.route::class)
+        }
+        if (isTopLevelDestination || currentDestination.id == navController.graph.findStartDestination().id) {
+            return
+        }
+        lastBackNavigationAt = now
+        navController.navigateUp()
+    }
+
     NavHost(
         navController = navController,
         startDestination = HomeRoute,
@@ -96,7 +119,7 @@ fun KikoNavHost(
 
         composable<LanConnectionRoute> {
             ConnectionScreen(
-                onBack = { navController.popBackStack() },
+                onBack = ::navigateUpSafely,
                 onConnected = {
                     navController.navigate(PlaylistBrowserRoute()) {
                         popUpTo(LanConnectionRoute) { inclusive = true }
@@ -107,14 +130,14 @@ fun KikoNavHost(
 
         composable<PlaylistBrowserRoute> {
             PlaylistBrowserScreen(
-                onBack = { navController.popBackStack() },
+                onBack = ::navigateUpSafely,
                 onPlayMedia = { targetRoute -> navController.navigate(targetRoute) }
             )
         }
 
         composable<VideoPlayerRoute> {
             VideoPlayerScreen(
-                onBack = { navController.popBackStack() },
+                onBack = ::navigateUpSafely,
                 onPlayMedia = { targetRoute ->
                     navController.popBackStack()
                     navController.navigate(targetRoute)
@@ -127,7 +150,7 @@ fun KikoNavHost(
 
         composable<WatchHistoryRoute> {
             WatchHistoryScreen(
-                onBack = { navController.popBackStack() },
+                onBack = ::navigateUpSafely,
                 onNavigateToPlayer = { target ->
                     navController.navigate(
                         VideoPlayerRoute(
