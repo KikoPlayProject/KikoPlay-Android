@@ -38,6 +38,12 @@ interface KikoPlayApi {
         @Query("id") mediaId: String
     ): SubtitleCheckResponse
 
+    @GET("sub/{format}/{mediaId}")
+    suspend fun getSubtitle(
+        @Path("format") format: String,
+        @Path("mediaId", encoded = true) mediaId: String
+    ): ResponseBody
+
     @POST("api/updateTime")
     suspend fun updatePlayTime(@Body body: UpdateTimeRequest)
 

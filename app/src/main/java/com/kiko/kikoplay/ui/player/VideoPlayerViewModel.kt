@@ -1,10 +1,13 @@
 package com.kiko.kikoplay.ui.player
 
+import android.content.Context
 import android.util.Base64
+import androidx.core.net.toUri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.kiko.kikoplay.data.model.PlayerPreferences
 import com.kiko.kikoplay.data.local.entity.CacheTaskEntity
 import com.kiko.kikoplay.data.local.model.CachedDanmakuPayload
@@ -26,11 +29,13 @@ import com.kiko.kikoplay.ui.player.danmaku.DanmakuParser
 import com.kiko.kikoplay.ui.player.danmaku.DanmakuSourceSummary
 import com.kiko.kikoplay.ui.player.danmaku.FullDanmakuComment
 import com.kiko.kikoplay.ui.player.subtitle.REMOTE_SUBTITLE_TRACK_ID
+import com.kiko.kikoplay.ui.player.subtitle.RemoteSubtitleNormalizer
 import com.kiko.kikoplay.ui.player.subtitle.SubtitleTrackSelector
 import com.kiko.kikoplay.util.CacheFileHelper
 import com.kiko.kikoplay.util.MediaUrlBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.Locale
 import javax.inject.Inject
 
 data class EpisodeUiItem(
@@ -87,6 +93,7 @@ data class PlayerUiState(
 @HiltViewModel
 class VideoPlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val appContext: Context,
     private val api: KikoPlayApi,
     private val mediaUrlBuilder: MediaUrlBuilder,
     private val watchHistoryRepository: WatchHistoryRepository,
@@ -268,18 +275,34 @@ class VideoPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val result = api.checkSubtitle(route.mediaId)
-                if (result.type.isNotBlank()) {
+                val format = result.type.trim().lowercase(Locale.ROOT)
+                if (format.isNotBlank()) {
+                    val subtitleFile = withContext(Dispatchers.IO) {
+                        val rawSubtitle = api.getSubtitle(format, route.mediaId).string()
+                        val normalizedSubtitle = RemoteSubtitleNormalizer.normalize(format, rawSubtitle)
+                        writeRemoteSubtitleCache(format, normalizedSubtitle)
+                    }
                     _uiState.update {
                         it.copy(
-                            subtitleFormat = result.type,
-                            subtitleUrl = mediaUrlBuilder.buildSubtitleUrl(result.type, route.mediaId),
-                            subtitleLabel = SubtitleTrackSelector.remoteSubtitleLabel(result.type),
+                            subtitleFormat = format,
+                            subtitleUrl = subtitleFile.toUri().toString(),
+                            subtitleLabel = SubtitleTrackSelector.remoteSubtitleLabel(format),
                             subtitleId = REMOTE_SUBTITLE_TRACK_ID
                         )
                     }
                 }
             } catch (_: Exception) {}
         }
+    }
+
+    private fun writeRemoteSubtitleCache(format: String, content: String): File {
+        val subtitleCacheDir = File(appContext.cacheDir, "remote_subtitles").apply {
+            mkdirs()
+        }
+        val safeFormat = format.takeIf { it.isNotBlank() } ?: "srt"
+        val subtitleFile = File(subtitleCacheDir, "${route.mediaId.hashCode()}.$safeFormat")
+        subtitleFile.writeText(content)
+        return subtitleFile
     }
 
     private fun shouldLoadRemoteSubtitle(): Boolean {
