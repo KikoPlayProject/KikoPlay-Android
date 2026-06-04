@@ -169,20 +169,23 @@ class HomeViewModel @Inject constructor(
         cacheTask: CacheTaskEntity?
     ): WatchHistoryEntity {
         val cachePath = cacheTask?.localPath?.takeIf { File(it).exists() }
+        val localPlayTime = localItem?.playTime ?: 0L
+        val localDuration = localItem?.duration ?: 0L
+        val localPlayTimeState = localItem?.playTimeState
         return pcItem.copy(
             id = localItem?.id ?: pcItem.id,
             title = pcItem.title.ifBlank { localItem?.title.orEmpty() },
             animeTitle = pcItem.animeTitle ?: localItem?.animeTitle,
-            playTime = if (pcItem.playTime > 0) pcItem.playTime else localItem?.playTime ?: 0L,
-            duration = maxOf(pcItem.duration, localItem?.duration ?: 0L),
-            playTimeState = pcItem.playTimeState.takeIf { pcItem.playTime > 0 }
-                ?: localItem?.playTimeState
+            playTime = localPlayTime.takeIf { it > 0L } ?: pcItem.playTime,
+            duration = maxOf(pcItem.duration, localDuration),
+            playTimeState = localPlayTimeState?.takeIf { localPlayTime > 0L || localDuration > 0L }
+                ?: pcItem.playTimeState.takeIf { pcItem.playTime > 0 }
                 ?: pcItem.playTimeState,
             sourceType = SOURCE_TYPE_PC,
             isCached = localItem?.isCached == true || cachePath != null,
             remoteUri = pcItem.remoteUri ?: localItem?.remoteUri,
             localPath = cachePath ?: localItem?.localPath,
-            thumbnailData = pcItem.thumbnailData ?: localItem?.thumbnailData,
+            thumbnailData = localItem?.thumbnailData ?: pcItem.thumbnailData,
             danmuPool = pcItem.danmuPool ?: localItem?.danmuPool,
             serverAddress = pcItem.serverAddress ?: localItem?.serverAddress,
             lastWatched = maxOf(pcItem.lastWatched, localItem?.lastWatched ?: 0L)
