@@ -664,11 +664,19 @@ fun VideoPlayerScreen(
     }
 
     // Danmaku play/pause sync
+    // isPlaying 来自 ExoPlayer.onIsPlayingChanged，仅在 STATE_READY && playWhenReady
+    // 时为 true，buffering 期间为 false，本身已是干净的二态，无需靠大延迟去抖。
+    // pause 必须立即执行（防止 buffering/seek 期间 DFM 按墙钟空跑导致时钟漂移）；
+    // resume 仅做轻去抖，避免快速点按播放/暂停造成 DFM 抖动。
     LaunchedEffect(isPlaying, danmakuPrepared) {
         if (!danmakuPrepared) return@LaunchedEffect
-        delay(300)
         try {
-            if (isPlaying) danmakuView.resume() else danmakuView.pause()
+            if (isPlaying) {
+                delay(100)
+                danmakuView.resume()
+            } else {
+                danmakuView.pause()
+            }
         } catch (_: Exception) {}
     }
 
@@ -773,6 +781,11 @@ fun VideoPlayerScreen(
         if (danmakuPrepared) {
             try {
                 danmakuView.seekTo(target)
+                // Seek 后立即暂停弹幕时钟，让 DFM 冻结在目标位置，直到 ExoPlayer
+                // 真正恢复播放（onIsPlayingChanged -> resume）。
+                // 否则 buffering 期间 DFM 仍按墙钟空跑，会累积时钟漂移，导致在屏
+                // 弹幕位置跳变（弹幕稀疏时尤为明显）。
+                danmakuView.pause()
             } catch (_: Exception) {
             }
         }

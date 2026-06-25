@@ -150,8 +150,8 @@ dependencies {
     // WorkManager
     implementation(libs.work.runtime.ktx)
 
-    // Danmaku
-    implementation(libs.danmaku)
+    // Danmaku (本地 fork：修复 DrawHandler.syncTimer 时钟跳变，见 thirdparty/DanmakuFlameMaster)
+    implementation(project(":thirdparty:DanmakuFlameMaster"))
 
     // QR scan
     implementation(libs.zxing.android.embedded)

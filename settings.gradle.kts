@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "KikoPlay"
 include(":app")
+include(":thirdparty:DanmakuFlameMaster")

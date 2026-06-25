@@ -23,3 +23,11 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+
+# Gradle build output of local modules (e.g. thirdparty/DanmakuFlameMaster/build)
+**/build/
+
+# Eclipse project files that may ship with vendored sources
+.classpath
+.project
+.settings/

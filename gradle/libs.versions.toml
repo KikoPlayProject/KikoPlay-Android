@@ -81,7 +81,9 @@ datastore-preferences = { group = "androidx.datastore", name = "datastore-prefer
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 
 # Danmaku
-danmaku = { group = "com.github.bilibili", name = "DanmakuFlameMaster", version.ref = "danmaku" }
+# 已切换为本地 fork (thirdparty/DanmakuFlameMaster) 以修复 DrawHandler.syncTimer 时钟跳变。
+# 保留版本号作为 fork 基线记录；maven 依赖条目已停用。
+# danmaku = { group = "com.github.bilibili", name = "DanmakuFlameMaster", version.ref = "danmaku" }
 
 # Test
 junit = { group = "junit", name = "junit", version.ref = "junit" }
