@@ -86,7 +86,8 @@ object DanmakuParser {
 
     fun toDisplayItems(
         comments: List<FullDanmakuComment>,
-        sources: List<DanmakuSource>
+        sources: List<DanmakuSource>,
+        hiddenSourceIds: Set<Int> = emptySet()
     ): List<DanmakuItem> {
         val timingBySourceId = sources.associate { source ->
             source.id to SourceTiming(
@@ -98,6 +99,8 @@ object DanmakuParser {
 
         return comments
             .mapNotNull { comment ->
+                // 来源被隐藏则不参与渲染（统计仍由 buildSourceSummaries 体现）
+                if (comment.sourceId in hiddenSourceIds) return@mapNotNull null
                 val adjustedTimeMs = applySourceTiming(
                     rawTimeMs = comment.rawTimeMs,
                     timing = timingBySourceId[comment.sourceId]

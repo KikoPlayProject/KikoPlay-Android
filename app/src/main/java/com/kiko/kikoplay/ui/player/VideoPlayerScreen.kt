@@ -64,6 +64,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Timer
@@ -116,6 +118,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -627,33 +630,43 @@ fun VideoPlayerScreen(
 
     // Load danmaku into view
     LaunchedEffect(uiState.danmakuItems) {
-        android.util.Log.d("DanmakuDebug", "LaunchedEffect: items=${uiState.danmakuItems.size}")
         danmakuPrepared = false
-        if (uiState.danmakuItems.isNotEmpty()) {
-            val parser = DanmakuParser.createParser(uiState.danmakuItems)
-            danmakuView.setCallback(object : master.flame.danmaku.controller.DrawHandler.Callback {
-                override fun prepared() {
-                    // prepared() 在后台线程回调，必须 post 到主线程操作 DanmakuView
-                    danmakuView.post {
-                        val exoTime = exoPlayer.currentPosition
-                        danmakuView.show()
-                        danmakuView.start(exoTime)
-                        if (exoPlayer.isPlaying) {
-                            danmakuView.resume()
-                        } else {
-                            danmakuView.pause()
-                        }
-                        danmakuPrepared = true
-                    }
-                }
-                override fun updateTimer(timer: master.flame.danmaku.danmaku.model.DanmakuTimer) {}
-                override fun danmakuShown(danmaku: BaseDanmaku?) {}
-                override fun drawingFinished() {}
-            })
-            danmakuView.enableDanmakuDrawingCache(true)
-            danmakuView.show()
-            danmakuView.prepare(parser, danmakuContext)
+        // items 变空（如全部来源被隐藏）时也要清掉在屏弹幕，否则残留弹幕会继续
+        // 滚动直到自然移出屏幕，表现为“关闭后仍有弹幕”。
+        if (uiState.danmakuItems.isEmpty()) {
+            danmakuView.clearDanmakusOnScreen()
+            return@LaunchedEffect
         }
+        val parser = DanmakuParser.createParser(uiState.danmakuItems)
+        danmakuView.setCallback(object : master.flame.danmaku.controller.DrawHandler.Callback {
+            override fun prepared() {
+                // prepared() 在后台线程回调，必须 post 到主线程操作 DanmakuView
+                danmakuView.post {
+                    val exoTime = exoPlayer.currentPosition
+                    danmakuView.show()
+                    danmakuView.start(exoTime)
+                    if (exoPlayer.isPlaying) {
+                        danmakuView.resume()
+                    } else {
+                        danmakuView.pause()
+                    }
+                    danmakuPrepared = true
+                }
+            }
+            override fun updateTimer(timer: master.flame.danmaku.danmaku.model.DanmakuTimer) {}
+            override fun danmakuShown(danmaku: BaseDanmaku?) {}
+            override fun drawingFinished() {}
+        })
+        danmakuView.enableDanmakuDrawingCache(true)
+        // DFM 的 prepare(parser, config) 在 drawTask 已存在时会复用旧 task：
+        // setParser 只更新 DrawHandler.mParser，drawTask 内部持有的 parser 仍是首次
+        // 创建时的旧引用，导致新弹幕列表（如切换来源可见性后的过滤结果）不会被
+        // DFM 真正采用，表现为“打开开关后弹幕仍不显示”。
+        // 这里先 release 销毁旧 drawTask 与 handler，让后续 prepare 走创建分支，
+        // 用新 parser 重建 drawTask，确保 DFM 真正接收最新弹幕列表。
+        danmakuView.release()
+        danmakuView.show()
+        danmakuView.prepare(parser, danmakuContext)
     }
 
     // Release on dispose
@@ -1212,6 +1225,7 @@ fun VideoPlayerScreen(
                     animeTitle = uiState.animeTitle,
                     episodes = uiState.episodes,
                     danmakuSourceSummaries = uiState.danmakuSourceSummaries,
+                    hiddenDanmakuSourceIds = uiState.hiddenDanmakuSourceIds,
                     isDanmakuLoading = uiState.isDanmakuLoading,
                     isDanmakuRefreshing = uiState.isDanmakuRefreshing,
                     onPlayEpisode = { episode ->
@@ -1228,6 +1242,7 @@ fun VideoPlayerScreen(
                     },
                     onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
                     onRefreshDanmaku = { viewModel.refreshDanmaku() },
+                    onToggleSourceVisible = { id -> viewModel.toggleDanmakuSourceVisibility(id) },
                     onUpdateDelay = { id, delay -> viewModel.updateSourceDelay(id, delay) },
                     onUpdateTimeline = { id, timeline -> viewModel.updateSourceTimeline(id, timeline) },
                     modifier = Modifier
@@ -1450,6 +1465,7 @@ fun VideoPlayerScreen(
                 animeTitle = uiState.animeTitle,
                 episodes = uiState.episodes,
                 danmakuSourceSummaries = uiState.danmakuSourceSummaries,
+                hiddenDanmakuSourceIds = uiState.hiddenDanmakuSourceIds,
                 isDanmakuLoading = uiState.isDanmakuLoading,
                 isDanmakuRefreshing = uiState.isDanmakuRefreshing,
                 onPlayEpisode = { episode ->
@@ -1466,6 +1482,7 @@ fun VideoPlayerScreen(
                 },
                 onCacheEpisodes = { episodes -> viewModel.cacheEpisodes(episodes) },
                 onRefreshDanmaku = { viewModel.refreshDanmaku() },
+                onToggleSourceVisible = { id -> viewModel.toggleDanmakuSourceVisibility(id) },
                 onUpdateDelay = { id, delay -> viewModel.updateSourceDelay(id, delay) },
                 onUpdateTimeline = { id, timeline -> viewModel.updateSourceTimeline(id, timeline) },
                 modifier = Modifier.weight(1f)
@@ -2485,11 +2502,13 @@ private fun PlayerContentPager(
     animeTitle: String?,
     episodes: List<EpisodeUiItem>,
     danmakuSourceSummaries: List<DanmakuSourceSummary>,
+    hiddenDanmakuSourceIds: Set<Int>,
     isDanmakuLoading: Boolean,
     isDanmakuRefreshing: Boolean,
     onPlayEpisode: (EpisodeUiItem) -> Unit,
     onCacheEpisodes: (List<EpisodeUiItem>) -> Unit,
     onRefreshDanmaku: () -> Unit,
+    onToggleSourceVisible: (Int) -> Unit,
     onUpdateDelay: (Int, Long) -> Unit,
     onUpdateTimeline: (Int, String) -> Unit,
     modifier: Modifier = Modifier
@@ -2504,9 +2523,11 @@ private fun PlayerContentPager(
             DanmakuSourcesPage(
                 currentPositionMs = currentPositionMs,
                 danmakuSourceSummaries = danmakuSourceSummaries,
+                hiddenDanmakuSourceIds = hiddenDanmakuSourceIds,
                 isDanmakuLoading = isDanmakuLoading,
                 isDanmakuRefreshing = isDanmakuRefreshing,
                 onRefreshDanmaku = onRefreshDanmaku,
+                onToggleSourceVisible = onToggleSourceVisible,
                 onUpdateDelay = onUpdateDelay,
                 onUpdateTimeline = onUpdateTimeline
             )
@@ -2578,9 +2599,11 @@ private fun PlayerContentPager(
                 1 -> DanmakuSourcesPage(
                     currentPositionMs = currentPositionMs,
                     danmakuSourceSummaries = danmakuSourceSummaries,
+                    hiddenDanmakuSourceIds = hiddenDanmakuSourceIds,
                     isDanmakuLoading = isDanmakuLoading,
                     isDanmakuRefreshing = isDanmakuRefreshing,
                     onRefreshDanmaku = onRefreshDanmaku,
+                    onToggleSourceVisible = onToggleSourceVisible,
                     onUpdateDelay = onUpdateDelay,
                     onUpdateTimeline = onUpdateTimeline
                 )
@@ -2692,9 +2715,11 @@ private fun EpisodeTabPage(
 private fun DanmakuSourcesPage(
     currentPositionMs: Long,
     danmakuSourceSummaries: List<DanmakuSourceSummary>,
+    hiddenDanmakuSourceIds: Set<Int>,
     isDanmakuLoading: Boolean,
     isDanmakuRefreshing: Boolean,
     onRefreshDanmaku: () -> Unit,
+    onToggleSourceVisible: (Int) -> Unit,
     onUpdateDelay: (Int, Long) -> Unit,
     onUpdateTimeline: (Int, String) -> Unit
 ) {
@@ -2768,7 +2793,9 @@ private fun DanmakuSourcesPage(
                 itemsIndexed(danmakuSourceSummaries, key = { _, source -> source.id }) { _, source ->
                     DanmakuSourceCard(
                         source = source,
+                        isVisible = source.id !in hiddenDanmakuSourceIds,
                         currentPositionMs = currentPositionMs,
+                        onToggleVisible = { onToggleSourceVisible(source.id) },
                         onUpdateDelay = onUpdateDelay,
                         onUpdateTimeline = onUpdateTimeline
                     )
@@ -2782,7 +2809,9 @@ private fun DanmakuSourcesPage(
 @Composable
 private fun DanmakuSourceCard(
     source: DanmakuSourceSummary,
+    isVisible: Boolean,
     currentPositionMs: Long,
+    onToggleVisible: () -> Unit,
     onUpdateDelay: (Int, Long) -> Unit,
     onUpdateTimeline: (Int, String) -> Unit
 ) {
@@ -2815,7 +2844,9 @@ private fun DanmakuSourceCard(
         )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .padding(16.dp)
+                .then(if (isVisible) Modifier else Modifier.alpha(0.5f)),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -2830,7 +2861,9 @@ private fun DanmakuSourceCard(
                     Text(
                         text = source.name,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isVisible) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     val scriptInfo = buildList {
                         source.scriptName?.let { add(it) }
@@ -2845,6 +2878,27 @@ private fun DanmakuSourceCard(
                     }
                 }
                 Spacer(Modifier.width(8.dp))
+                FilledTonalIconButton(
+                    onClick = { onToggleVisible() },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = if (isVisible) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentColor = if (isVisible) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isVisible) Icons.Default.Visibility
+                        else Icons.Default.VisibilityOff,
+                        contentDescription = if (isVisible) "隐藏此来源弹幕"
+                        else "显示此来源弹幕",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
                 FilledTonalIconButton(
                     onClick = {
                         initialTimePointMs = currentPositionMs.coerceAtLeast(0L)

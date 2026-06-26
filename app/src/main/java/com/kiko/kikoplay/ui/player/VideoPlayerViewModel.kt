@@ -20,6 +20,7 @@ import com.kiko.kikoplay.data.remote.model.UpdateTimelineRequest
 import com.kiko.kikoplay.data.remote.model.ScreenshotRequest
 import com.kiko.kikoplay.data.remote.model.LaunchDanmakuRequest
 import com.kiko.kikoplay.data.repository.CacheRepository
+import com.kiko.kikoplay.data.repository.HiddenDanmakuSourceStore
 import com.kiko.kikoplay.data.repository.PlaylistRepository
 import com.kiko.kikoplay.data.repository.SettingsRepository
 import com.kiko.kikoplay.data.repository.WatchHistoryRepository
@@ -78,6 +79,7 @@ data class PlayerUiState(
     val danmakuItems: List<DanmakuItem> = emptyList(),
     val danmakuSources: List<DanmakuSource> = emptyList(),
     val danmakuSourceSummaries: List<DanmakuSourceSummary> = emptyList(),
+    val hiddenDanmakuSourceIds: Set<Int> = emptySet(),
     val launchScripts: List<String> = emptyList(),
     val episodes: List<EpisodeUiItem> = emptyList(),
     val isDanmakuLoading: Boolean = false,
@@ -101,6 +103,7 @@ class VideoPlayerViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val connectionManager: ConnectionManager,
     private val settingsRepository: SettingsRepository,
+    private val hiddenDanmakuSourceStore: HiddenDanmakuSourceStore,
     private val json: Json
 ) : ViewModel() {
     private companion object {
@@ -318,13 +321,15 @@ class VideoPlayerViewModel @Inject constructor(
     }
 
     private fun loadDanmaku() {
-        loadCachedDanmaku()?.let { cached ->
+        val hiddenIds = hiddenDanmakuSourceStore.getHiddenSourceIds(route.danmuPool)
+        loadCachedDanmaku(hiddenIds)?.let { cached ->
             fullDanmakuComments = cached.fullComments
             _uiState.update {
                 it.copy(
                     danmakuItems = cached.items,
                     danmakuSources = cached.sources,
                     danmakuSourceSummaries = cached.sourceSummaries,
+                    hiddenDanmakuSourceIds = hiddenIds,
                     launchScripts = cached.launchScripts
                 )
             }
@@ -343,12 +348,13 @@ class VideoPlayerViewModel @Inject constructor(
                 val comments = DanmakuParser.parseFullComments(response.comment)
                 fullDanmakuComments = comments
                 val sources = response.source ?: emptyList()
-                val items = DanmakuParser.toDisplayItems(comments, sources)
+                val items = DanmakuParser.toDisplayItems(comments, sources, hiddenIds)
                 _uiState.update {
                     it.copy(
                         danmakuItems = items,
                         danmakuSources = sources,
                         danmakuSourceSummaries = DanmakuParser.buildSourceSummaries(comments, sources),
+                        hiddenDanmakuSourceIds = hiddenIds,
                         launchScripts = response.launchScripts ?: emptyList(),
                         isDanmakuLoading = false
                     )
@@ -383,7 +389,7 @@ class VideoPlayerViewModel @Inject constructor(
         }
     }
 
-    private fun loadCachedDanmaku(): CachedDanmakuState? {
+    private fun loadCachedDanmaku(hiddenSourceIds: Set<Int>): CachedDanmakuState? {
         if (route.sourceType != 2) return null
 
         val mediaPath = route.localPath ?: return null
@@ -400,7 +406,7 @@ class VideoPlayerViewModel @Inject constructor(
                 else -> emptyList()
             }
             val items = when (payload.format) {
-                CachedDanmakuPayload.FORMAT_FULL -> DanmakuParser.toDisplayItems(fullComments, payload.sources ?: emptyList())
+                CachedDanmakuPayload.FORMAT_FULL -> DanmakuParser.toDisplayItems(fullComments, payload.sources ?: emptyList(), hiddenSourceIds)
                 else -> DanmakuParser.parseV3(payload.comment)
             }
             CachedDanmakuState(
@@ -439,9 +445,10 @@ class VideoPlayerViewModel @Inject constructor(
                 fullDanmakuComments = mergedComments
 
                 val sources = uiState.value.danmakuSources
+                val hiddenIds = uiState.value.hiddenDanmakuSourceIds
                 _uiState.update {
                     it.copy(
-                        danmakuItems = DanmakuParser.toDisplayItems(mergedComments, sources),
+                        danmakuItems = DanmakuParser.toDisplayItems(mergedComments, sources, hiddenIds),
                         danmakuSourceSummaries = DanmakuParser.buildSourceSummaries(
                             comments = mergedComments,
                             sources = sources,
@@ -505,6 +512,26 @@ class VideoPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setPlayerPreferences(updatedPreferences)
         }
+    }
+
+    /**
+     * 切换某个弹幕来源在播放区域的显示 / 隐藏。
+     *
+     * 与全局开关 [toggleDanmaku] 不同：全局关闭会让整个 DanmakuView GONE；
+     * 来源隐藏仅过滤该来源的弹幕，其余来源仍正常渲染，统计信息在"弹幕"tab 中始终可见。
+     * 状态按弹幕池隔离并在会话内保持，覆盖同一番剧跨集复用。
+     */
+    fun toggleDanmakuSourceVisibility(sourceId: Int) {
+        val pool = route.danmuPool
+        val current = uiState.value.hiddenDanmakuSourceIds
+        val nowHidden = if (sourceId in current) {
+            current - sourceId
+        } else {
+            current + sourceId
+        }
+        hiddenDanmakuSourceStore.replaceAll(pool, nowHidden)
+        _uiState.update { it.copy(hiddenDanmakuSourceIds = nowHidden) }
+        rebuildDanmakuDisplay()
     }
 
     fun updatePlayerPreferences(preferences: PlayerPreferences) {
@@ -720,9 +747,10 @@ class VideoPlayerViewModel @Inject constructor(
     private fun rebuildDanmakuDisplay() {
         val sources = uiState.value.danmakuSources
         if (fullDanmakuComments.isEmpty()) return
+        val hiddenIds = uiState.value.hiddenDanmakuSourceIds
         _uiState.update { state ->
             state.copy(
-                danmakuItems = DanmakuParser.toDisplayItems(fullDanmakuComments, sources),
+                danmakuItems = DanmakuParser.toDisplayItems(fullDanmakuComments, sources, hiddenIds),
                 danmakuSourceSummaries = DanmakuParser.buildSourceSummaries(
                     comments = fullDanmakuComments,
                     sources = sources,
